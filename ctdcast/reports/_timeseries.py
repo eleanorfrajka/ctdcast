@@ -48,6 +48,7 @@ from ctdcast.config.report_tokens import (
 )
 from ctdcast.identity import compact_cast_list, expand_cast_ids, format_cast_id
 from ctdcast.reports._env import get_template
+from ctdcast.reports._figdebug import as_panel
 from ctdcast.reports._format import _fmt_utc, profile_cast_suffixes
 from ctdcast.reports._manifest import (
     Panel,
@@ -55,8 +56,10 @@ from ctdcast.reports._manifest import (
     Profile,
     ResolvedReport,
     Section,
+    Stub,
     resolve,
 )
+from ctdcast.reports._navs import nav_for
 from ctdcast.reports._plots import (
     RenderedPanel,
     _make_ladcp_section_b64,
@@ -94,6 +97,7 @@ def generate_timeseries_page(
     prev_name: str | None = None,
     next_name: str | None = None,
     cruise_info: dict[str, Any] | None = None,
+    inventory: list[dict[str, str]] | None = None,
     cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
 ) -> Path | None:
     """Generate a per-timeseries HTML page for a named group of repeat casts.
@@ -137,6 +141,9 @@ def generate_timeseries_page(
         Name of the following timeseries group (for the → nav button).  None omits the button.
     cruise_info:
         Cruise-level metadata mapping used in the page header; ``None`` omits it.
+    inventory:
+        The "Data inventory:" strip pills (``{"label", "href"}``) shown beneath the
+        masthead; see :func:`~ctdcast.reports._navs.inventory_pills`.
     cfg:
         Report configuration (styling, paths, display) threaded to the plotters.
 
@@ -349,7 +356,7 @@ def generate_timeseries_page(
         css=SHARED_CSS,
         js_top_links=_JS_TOP_LINKS,
         nav_prefix="../",
-        nav_current="timeseries",
+        nav=nav_for("timeseries", prefix="../", inventory=inventory or ()),
         masthead_bg=ROLE_ACCENT["aggregate-b"],
     )
     out_file.write_text(html, encoding="utf-8")
@@ -390,10 +397,10 @@ def _ts_slot(c: TimeseriesPageCtx) -> str:
 
 def _ts_field_render(
     var: str, *, canonical: str | None, optional: bool
-) -> Callable[[TimeseriesPageCtx], str | None]:
+) -> Callable[[TimeseriesPageCtx], str | Stub | None]:
     """Build the render closure for one timeseries field (var vs cast time)."""
 
-    def _render(c: TimeseriesPageCtx) -> str | None:
+    def _render(c: TimeseriesPageCtx) -> str | Stub | None:
         resolved = resolve_sensor_var(c.ds_ts, var) if optional else var
         key = canonical or var
         _vmin = (
@@ -406,16 +413,18 @@ def _ts_field_render(
             if c.vmax.get(resolved) is not None
             else c.vmax.get(key)
         )
-        return _make_timeseries_b64(
-            c.ds_ts,
-            resolved,
-            vlabel(var),
-            style=c.section_style,
-            vmin=_vmin,
-            vmax=_vmax,
-            figw=c.ts_figw,
-            optional=optional,
-            cfg=c.cfg,
+        return as_panel(
+            lambda: _make_timeseries_b64(
+                c.ds_ts,
+                resolved,
+                vlabel(var),
+                style=c.section_style,
+                vmin=_vmin,
+                vmax=_vmax,
+                figw=c.ts_figw,
+                optional=optional,
+                cfg=c.cfg,
+            )
         )
 
     return _render
