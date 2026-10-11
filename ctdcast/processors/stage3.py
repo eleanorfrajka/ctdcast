@@ -17,6 +17,15 @@ from pathlib import Path
 import xarray as xr
 
 from ctdcast.analysis.derive import derive_salinity
+from ctdcast.config.preferred_sensors import (
+    GROUPS,
+    SensorGroup,
+    has_choice,
+    has_use,
+    index_of,
+    preferred_sensor_names,
+    resolve_preferred,
+)
 from ctdcast.identity import format_cast_id
 from ctdcast.processors import qc
 from ctdcast.processors.history import (
@@ -24,6 +33,7 @@ from ctdcast.processors.history import (
     add_processing_level,
     append_history,
 )
+from ctdcast.processors.sensor_catalog import read_cast_sensor_catalog
 from ctdcast.processors.stage_layout import (
     group_by_cast,
     is_up_to_date,
@@ -127,6 +137,143 @@ def _apply_conductivity_slope(ds: xr.Dataset, slope: float) -> xr.Dataset:
     return ds
 
 
+def _preferred_use(
+    group: SensorGroup, records: list[dict], cruise_cfg: dict, cast_number: int
+) -> str | None:
+    """Return the use (``primary`` / ``secondary``) that applies to this cast, or None.
+
+    The shared gate for both the attribute stamp and the composite build, so the two cannot
+    diverge.  Returns None when the group is undeclared for this cast, or when the cast has
+    no genuine primary-vs-secondary choice (single-sensor for this group — its one sensor is
+    already the plain composite).  Raises only when an **explicit range** names the channel a
+    single-sensor cast lacks.
+
+    Raises
+    ------
+    ValueError
+        On a malformed declaration / out-of-set value / conflicting overlap (via
+        :func:`resolve_preferred`), or an explicit range naming a channel the cast lacks.
+    """
+    use, source = resolve_preferred(group, cruise_cfg, cast_number)
+    if use is None:
+        return None
+    if not has_choice(group, records):
+        if source == "range" and not has_use(group, records, use):
+            raise ValueError(
+                f"{group.config_key}: cast {cast_number} is declared {use!r} by an "
+                f"explicit range, but it has no {use} sensor for "
+                f"{', '.join(group.preferred_roles)} (a single-sensor cast)."
+            )
+        return None
+    return use
+
+
+def _stamp_preferred_sensors(
+    ds: xr.Dataset, cruise_cfg: dict | None, cast_number: int
+) -> None:
+    """Stamp the per-cast preferred-sensor choice onto *ds* in place (stage 3 only).
+
+    For each sensor group with a genuine choice on this cast, record both the choice word
+    (``preferred_pair`` / ``preferred_oxygen``) and the resolved physical sensors as
+    ``sensor_<role>_preferred`` — the ``SENSOR_*`` catalog variable names.  Holding the
+    catalog names (rather than bare serials) lets a consumer verify, at read time, that the
+    named channel still carries the expected serial.  Groups with no choice (single-sensor)
+    or no declaration leave no attribute — never the string ``"undeclared"``.
+
+    Parameters
+    ----------
+    ds:
+        The stage-3 dataset, carrying the ``SENSOR_*`` catalog stage 1 built; mutated in
+        place.
+    cruise_cfg:
+        The ``processing:`` config block (``cruise_cfg[group.config_key]`` is the nested
+        declaration, or absent).
+    cast_number:
+        The cast's integer number; a lettered cast resolves by its number.
+
+    Raises
+    ------
+    ValueError
+        On a declaration that is not a mapping, a range missing its ``casts`` key, a config
+        value outside the closed set, conflicting overlapping ranges, or an explicit range
+        naming a channel the cast lacks.
+    """
+    cfg = cruise_cfg or {}
+    records = read_cast_sensor_catalog(ds)
+    for group in GROUPS:
+        use = _preferred_use(group, records, cfg, cast_number)
+        if use is None:
+            continue
+        # Names come from this cast's own catalog records, so each is a SENSOR_* variable
+        # present in ds by construction — no re-check needed here; the read-time check is
+        # the consumer's (a stamped name whose channel serial later disagrees = corruption).
+        ds.attrs[group.config_key] = use
+        for role, catalog_name in preferred_sensor_names(group, records, use).items():
+            ds.attrs[f"sensor_{role}_preferred"] = catalog_name
+
+
+def _build_preferred_composites(
+    ds: xr.Dataset, cruise_cfg: dict | None, cast_number: int
+) -> None:
+    """Build the plain composite variables from each group's preferred channel, in place.
+
+    For a cast with a genuine choice, copies the preferred indexed channel to the plain
+    (unsuffixed) name for every group member — ``ctd_temperature_<idx>`` → ``ctd_temperature``,
+    and likewise ``ctd_salinity``, ``conductivity``, ``ctd_oxygen`` — carrying the channel's
+    ``{var}_qc`` companion so QC propagates.  The composite is a **per-cast selection, never a
+    blend**; an undeclared dual cast gets no composite (so downstream it is absent, never a
+    silent ``_1`` fallback).  A single-sensor cast has no choice and is left untouched: its
+    T/S/O already carry the plain name (stage-1 promotion), while conductivity keeps
+    ``conductivity_1`` (stage 1 does not promote it), so such a cast has no plain
+    ``conductivity``.
+
+    Parameters
+    ----------
+    ds:
+        The stage-3 dataset; mutated in place.
+    cruise_cfg:
+        The ``processing:`` config block.
+    cast_number:
+        The cast's integer number.
+    """
+    cfg = cruise_cfg or {}
+    records = read_cast_sensor_catalog(ds)
+    for group in GROUPS:
+        use = _preferred_use(group, records, cfg, cast_number)
+        if use is None:
+            continue
+        idx = index_of(use)
+        for member in group.members:
+            src = f"{member}_{idx}"
+            if src not in ds:
+                continue
+            da = ds[src]
+            # Carry the source channel's attrs (units, standard_name, calibration provenance,
+            # processing_level) so the composite is self-describing before the writer runs.
+            # But a composite is a per-cast *selection* of one channel, not a renamed source
+            # column, so drop the CNV-origin attrs: `cnv_original_name` / `source_variable` are
+            # the rename-table keys (readers.metadata.source_to_canonical) and would collide
+            # with the indexed channel's own entry, mislabeling which CNV column became which
+            # variable. Drop long_name too, so the writer sets the composite's own
+            # ("… (preferred pair)"), and add the selection provenance.
+            _drop = {"long_name", "cnv_original_name", "source_variable"}
+            attrs = {k: v for k, v in da.attrs.items() if k not in _drop}
+            attrs["comment"] = (
+                f"preferred {use} channel; copied from {src} per {group.config_key}"
+            )
+            ds[member] = xr.DataArray(da.values, dims=da.dims, attrs=attrs)
+            qc_src = f"{src}_qc"
+            if qc_src in ds:
+                # Drop the source's long_name ("Quality flag for conductivity_1") so the
+                # writer sets the composite's ("Quality flag for conductivity").
+                qc_attrs = {
+                    k: v for k, v in ds[qc_src].attrs.items() if k != "long_name"
+                }
+                ds[f"{member}_qc"] = xr.DataArray(
+                    ds[qc_src].values, dims=ds[qc_src].dims, attrs=qc_attrs
+                )
+
+
 def run(
     root: Path,
     *,
@@ -220,6 +367,8 @@ def run(
             if _src_id:
                 ds_out.attrs["source_tracking_id"] = _src_id
             ds_out.attrs["processing_stage"] = 3
+            _stamp_preferred_sensors(ds_out, cruise_cfg, cast_id[0])
+            _build_preferred_composites(ds_out, cruise_cfg, cast_id[0])
             if declare_delayed:
                 ds_out.attrs["data_mode"] = "D"
                 # The claim is backed only if a calibration was actually applied — detected by
