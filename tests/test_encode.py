@@ -1,4 +1,4 @@
-"""Tests for the vendored encoder's error policy (``reports/_encode.render_b64``).
+"""Tests for the vendored encoder's error policy (``reports/_vendored/figure_png.render_b64``).
 
 When a draw function raises and ``RAISE_ON_PLOT_ERROR`` is unset, the panel is
 omitted: the warning now names the cause, and an ``on_error`` callback (used by
@@ -11,8 +11,8 @@ import warnings
 
 import pytest
 
-from ctdcast.config import report_tokens
-from ctdcast.reports._encode import render_b64
+from ctdcast.reports._vendored import design_tokens as report_tokens
+from ctdcast.reports._vendored.figure_png import render_b64
 
 
 def _boom():

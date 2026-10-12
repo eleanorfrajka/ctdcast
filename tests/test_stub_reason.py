@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from ctdcast.config import report_tokens
 from ctdcast.reports._figdebug import as_panel, render_b64
-from ctdcast.reports._manifest import Panel, Profile, Section, Stub, resolve
+from ctdcast.reports._vendored import design_tokens as report_tokens
+from ctdcast.reports._vendored.page_model import Panel, Profile, Section, Stub, resolve
 
 _HERE = Path(__file__).resolve().parent
 _CAST_011 = _HERE / "fixtures" / "nc" / "mixsed2_011.nc"
@@ -66,8 +66,8 @@ def test_resolved_page_shows_the_reason():
 
 def test_real_cast_page_shows_reason_when_a_plotter_raises(tmp_path, monkeypatch):
     """A patched draw on a real cast page renders a stub that names the cause."""
-    from ctdcast.reports._cast import generate_station_page
-    from ctdcast.reports._index import _read_cast_meta
+    from ctdcast.reports.cast import generate_station_page
+    from ctdcast.reports.index import _read_cast_meta
 
     def _raise(*_a, **_k):
         raise RuntimeError("patched boom")

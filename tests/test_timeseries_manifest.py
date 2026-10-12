@@ -12,10 +12,10 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
-from ctdcast.config.report_tokens import SLOTS
 from ctdcast.reports._anchors import LEGACY_ANCHORS
-from ctdcast.reports._section import SECTION_DEFAULT
-from ctdcast.reports._timeseries import (
+from ctdcast.reports._vendored.design_tokens import SLOTS
+from ctdcast.reports.section import SECTION_DEFAULT
+from ctdcast.reports.timeseries import (
     TIMESERIES_DEFAULT,
     TIMESERIES_PANELS,
     _ts_field_panel,

@@ -32,21 +32,11 @@ from ctdcast.config.parameters import (
     vlabel,
 )
 from ctdcast.config.report_config import DEFAULT_REPORT_CONFIG, ReportConfig
-from ctdcast.config.report_tokens import ROLE_ACCENT
 from ctdcast.identity import compact_cast_list, expand_cast_ids, format_cast_id
 from ctdcast.plotters.plots import section_figsize_and_slot
 from ctdcast.reports._env import get_template
 from ctdcast.reports._figdebug import as_panel
 from ctdcast.reports._format import _fmt_utc, profile_cast_suffixes
-from ctdcast.reports._manifest import (
-    Panel,
-    PanelGroup,
-    Profile,
-    ResolvedReport,
-    Section,
-    Stub,
-    resolve,
-)
 from ctdcast.reports._navs import nav_for
 from ctdcast.reports._plots import (
     RenderedPanel,
@@ -57,7 +47,17 @@ from ctdcast.reports._plots import (
     _make_section_ts_o2_b64,
     _make_section_ts_profiles_b64,
 )
-from ctdcast.reports._report_css import _JS_TOP_LINKS, SHARED_CSS
+from ctdcast.reports._vendored.design_tokens import ROLE_ACCENT
+from ctdcast.reports._vendored.page_model import (
+    Panel,
+    PanelGroup,
+    Profile,
+    ResolvedReport,
+    Section,
+    Stub,
+    resolve,
+)
+from ctdcast.reports.design import _JS_TOP_LINKS, SHARED_CSS
 
 # Panel variables are defined in ctdcast.config.parameters:
 #   SECTION_PHYSICS_VARS / SECTION_BIOGEO_VARS  (shared with _index.py, _timeseries.py)
@@ -70,6 +70,9 @@ from ctdcast.reports._report_css import _JS_TOP_LINKS, SHARED_CSS
 # ---------------------------------------------------------------------------
 # Public function
 # ---------------------------------------------------------------------------
+
+
+__all__ = ["generate_section_page"]
 
 
 def generate_section_page(
@@ -413,7 +416,7 @@ def generate_section_page(
 
 
 # ---------------------------------------------------------------------------
-# Section manifest — the section page as data (see rep-section-manifest-plan.md)
+# Section manifest — the section page as data
 # ---------------------------------------------------------------------------
 
 

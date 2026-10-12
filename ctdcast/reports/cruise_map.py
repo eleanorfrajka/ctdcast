@@ -32,11 +32,11 @@ import numpy as np
 from ctdcast._version import __version__ as _VERSION
 from ctdcast.analysis.bathymetry import load_gebco
 from ctdcast.config.report_config import DEFAULT_REPORT_CONFIG, ReportConfig
-from ctdcast.config.report_tokens import ROLE_ACCENT
 from ctdcast.identity import expand_cast_numbers, format_cast_id
 from ctdcast.reports._env import get_template
 from ctdcast.reports._navs import nav_for
-from ctdcast.reports._report_css import SHARED_CSS
+from ctdcast.reports._vendored.design_tokens import ROLE_ACCENT
+from ctdcast.reports.design import SHARED_CSS
 
 _SECTION_COLOR_DEFAULT = "#7b2d8b"
 _LEAFLET_VERSION = "1.9.4"
@@ -416,6 +416,9 @@ def _safe_json(obj: Any) -> str:  # noqa: ANN401  # arbitrary JSON-serialisable 
 # ---------------------------------------------------------------------------
 
 
+__all__ = ["generate_leaflet_map"]
+
+
 def generate_leaflet_map(
     all_meta: list[dict[str, Any]],
     sections_cfg: dict[str, Any],
@@ -428,12 +431,36 @@ def generate_leaflet_map(
 ) -> Path | None:
     """Generate a Leaflet.js interactive cruise map at ``<out_dir>/leaflet.html``.
 
-    Always regenerates (force is accepted for API symmetry but ignored).
-    If ``ship_track_nc`` is provided and the file exists, the ship track is
-    loaded, subsampled, and rendered as a grey polyline behind cast markers.
-    ``cruise`` should be the resolved cruise identifier (from ``cruise_info`` or
-    the NC file attribute); it is displayed in the map page title.
-    Returns the output path, or None if all_meta is empty.
+    Always regenerates. When ``ship_track_nc`` exists the ship track is loaded,
+    subsampled, and drawn as a grey polyline behind the cast markers.
+
+    Parameters
+    ----------
+    all_meta : list of dict
+        Per-cast metadata (lat/lon/time/max depth/…); an empty list returns ``None``.
+    sections_cfg : dict
+        Section/grouping definitions (``cast_numbers``, ``color``, …) used to
+        colour and group the cast markers.
+    out_dir : pathlib.Path
+        Report root; the page is written to ``out_dir / "leaflet.html"``.
+    force : bool, default False
+        Accepted for parity with the other page builders; ignored (the map is
+        always regenerated).
+    ship_track_nc : pathlib.Path or None, optional
+        Ship-track netCDF, drawn as a background polyline when present and
+        readable; ``None`` or a missing file omits the track.
+    cruise : str, default "UNK"
+        Resolved cruise identifier, shown in the map page title.
+    inventory : list of dict or None, optional
+        The "Data inventory:" strip pills (``{"label", "href"}``) under the
+        masthead; ``None`` omits the strip.
+    cfg : ReportConfig, optional
+        Report configuration (bathymetry path, map bounds, …) threaded to the drawers.
+
+    Returns
+    -------
+    pathlib.Path or None
+        The written ``leaflet.html`` path, or ``None`` when ``all_meta`` is empty.
     """
     if not all_meta:
         return None

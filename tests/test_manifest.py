@@ -1,4 +1,4 @@
-"""Tests for the section-manifest model and resolver (``reports/_manifest.py``).
+"""Tests for the section-manifest model and resolver (``reports/_vendored/page_model.py``).
 
 These exercise the resolution algorithm in isolation with synthetic panels and
 sections — no rendered page needed.  They pin the invariants from the design
@@ -9,7 +9,7 @@ becoming stubs while the section keeps its heading and number.
 
 import pytest
 
-from ctdcast.reports._manifest import (
+from ctdcast.reports._vendored.page_model import (
     Expand,
     Panel,
     PanelGroup,
@@ -382,3 +382,36 @@ def test_anchor_returns_number_or_none():
     report = resolve(profile, ctx=None, panels=panels)
     assert report.anchor("hydro") == "1"
     assert report.anchor("vel") is None
+
+
+def test_stub_reason_is_shaped_to_one_line():
+    """A multi-line reason collapses to its first non-empty line."""
+    assert Stub("boom\nstack frame 1\nstack frame 2").reason == "boom"
+
+
+def test_stub_reason_skips_a_blank_leading_line():
+    """A reason beginning with a newline takes the first non-empty line."""
+    assert Stub("\n\nreal cause").reason == "real cause"
+
+
+def test_stub_reason_is_length_capped():
+    """An over-long reason is truncated with an ellipsis."""
+    reason = Stub("x" * 500).reason
+    assert len(reason) == 140
+    assert reason.endswith("…")
+
+
+def test_stub_from_exc_uses_type_name_for_empty_message():
+    """An exception with no message becomes its type name, not an empty reason."""
+    assert Stub.from_exc(ValueError()).reason == "ValueError"
+    assert Stub.from_exc(ValueError("bad value")).reason == "bad value"
+
+
+def test_track_colors_are_okabe_ito_in_order():
+    """TRACK_COLORS is the fixed 8-colour Okabe–Ito list, blue first, yellow last."""
+    from ctdcast.reports._vendored.design_tokens import TRACK_COLORS
+
+    assert TRACK_COLORS[0] == "#0072B2"
+    assert TRACK_COLORS[-1] == "#F0E442"
+    assert len(TRACK_COLORS) == len(set(TRACK_COLORS)) == 8
+    assert all(c.startswith("#") and len(c) == 7 for c in TRACK_COLORS)

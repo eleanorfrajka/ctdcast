@@ -1,26 +1,27 @@
 """Shared CSS for the report HTML pages, generated from the design tokens.
 
 ``emit_css(package_accent)`` builds the whole stylesheet string from
-``..config.report_tokens`` — colours, typography, spacing, radii and the slot
+the sibling ``design_tokens`` module — colours, typography, spacing, radii and the slot
 table — so no value is restated here.  Its output is concatenated into each page
 template's ``<style>`` block (``{{ css | safe }}``).
 
 This module is written to be **vendored** across the packages that share the
 report design system: it names no package and holds no per-package colour table,
-reading shared values only through ``..config.report_tokens``.  The accent
+reading shared values only through the sibling ``design_tokens`` module.  The accent
 colour to render is an argument to ``emit_css``, supplied by the
-(package-specific) caller — so the file itself carries no package-specific edit
-(Phase A; no cross-repo hash test yet, spec §9).
+(package-specific) caller — so the file itself carries no package-specific edit.
 """
 
 from __future__ import annotations
 
-from ..config.report_tokens import (
+from .design_tokens import (
     COLORS,
     CONTENT_MAX_PX,
     FONT_MONO,
     FONT_SANS,
     GRAYS,
+    QC_COLORS,
+    QC_TEXT_COLORS,
     RADII,
     ROLE_ACCENT,
     SEMANTIC,
@@ -48,6 +49,13 @@ def _emit_root(package_accent: str) -> str:
         lines.append(f"  --sp-{key}: {value};")
     for key, value in RADII.items():
         lines.append(f"  --radius-{key}: {value};")
+    # QC-flag colours, mirrored from the same dict so HTML (``--qc-<flag>``) and
+    # matplotlib (QC_COLORS) cannot drift.  ``--qc-<flag>-text`` are the darkened
+    # text variants.
+    for flag, value in QC_COLORS.items():
+        lines.append(f"  --qc-{flag}: {value};")
+    for flag, value in QC_TEXT_COLORS.items():
+        lines.append(f"  --qc-{flag}-text: {value};")
     lines.append("}")
     return "\n".join(lines)
 
@@ -84,8 +92,8 @@ def _emit_nav_pills() -> str:
 def emit_css(package_accent: str) -> str:
     """Return the full shared stylesheet as a string, generated from the tokens.
 
-    Reproduces the established page look from the design tokens (spec §12–15 v2.0
-    are the current values, not a redesign).  The only additions over
+    Reproduces the established page look from the design tokens (the current
+    values, not a redesign).  The only additions over
     the previous hand-written stylesheet are the package accent's two homes — a
     masthead ``.wordmark`` and the footer's ``border-top`` — plus the ``78ch``
     reading measure and the ``@media print`` rules for browser printing.  (The
@@ -155,6 +163,13 @@ h2 {{
    figure block, so it spans the content width rather than the 78ch prose measure a
    paragraph would otherwise inherit — which left it stranded under full-width figures. */
 h2 + .caption {{ margin-top: -0.5rem; max-width: none; }}
+/* Subsection headings inside a panel's own HTML — un-numbered, outside the jump
+   nav (the page model numbers Sections, not these).  Same navy as h2, smaller. */
+h3 {{
+  color: var(--ocean); font-size: var(--fs-h3); margin: 1.2rem 0 0.4rem;
+}}
+h3 + .caption {{ margin-top: -0.2rem; }}
+figure h3, .fig-row > h3 {{ margin-top: 0.6rem; }}  /* first heading inside a panel sits closer */
 .explainer {{
   font-size: var(--fs-note); color: var(--text);
   background: var(--bg-sunken); border-left: 3px solid var(--muted);
@@ -242,11 +257,17 @@ td.mono {{ font-family: var(--font-mono); font-size: var(--fs-xs); }}
    "Data inventory:" file strip.  A pill's colour is its role, never its page; the
    current page's pill and an already-viewed file pill are muted the same way. */
 .page-nav {{ margin: 0.65rem 0 0.5rem; }}
+/* Consecutive nav rows (a multi-row masthead) stack tighter than the first row's
+   top margin, which is sized for a single row. */
+.page-nav + .page-nav {{ margin-top: 0.15rem; }}
 .page-nav-label {{ font-size: var(--fs-top); opacity: 0.75; margin-right: 0.3rem; }}
 .nav-pill {{
   display: inline-block; padding: 0.2em 0.65em; border-radius: var(--radius-btn);
   font-size: var(--fs-nav); font-weight: 700; text-decoration: none; color: #fff;
   margin: 0 0.2rem 0.25rem 0;
+  /* A contrasting inner edge keeps a pill visible when its role colour matches the
+     masthead background, so colour-is-role holds on any masthead. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
 }}
 {nav_pills}
 .nav-current {{ opacity: 0.5; pointer-events: none; }}
@@ -277,6 +298,7 @@ footer a {{ color: var(--muted); }}
   .masthead-header h1, .masthead h1 {{ font-size: 1.35rem; }}
   .meta-grid {{ grid-template-columns: repeat(4, 1fr); gap: 0.3rem 1rem; font-size: var(--fs-xs); }}
   h2 {{ page-break-after: avoid; }}
+  h3 {{ page-break-after: avoid; }}
   .fig-row, figure, table {{ break-inside: avoid; }}
   .jump-nav {{ display: none; }}
 }}
@@ -284,7 +306,7 @@ footer a {{ color: var(--muted); }}
 
 
 def print_css(*, terse: bool = False) -> str:
-    """Return the print stylesheet, injected at PDF render time (spec §8.1).
+    """Return the print stylesheet, injected at PDF render time.
 
     These WeasyPrint-specific rules are kept out of the screen stylesheet so
     screen output is byte-identical; a PDF renderer appends them at render time.

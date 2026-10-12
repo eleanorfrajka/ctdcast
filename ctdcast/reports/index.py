@@ -23,6 +23,7 @@ from ctdcast.config.parameters import (
     SECTION_BIOGEO_VARS,
     SECTION_PHYSICS_VARS,
     UNKNOWN_CRUISE_ID,
+    resolve_sensor_var,
     vlabel,
     vlabel_html,
 )
@@ -36,16 +37,7 @@ from ctdcast.identity import (
 from ctdcast.processors.stage_layout import select_best_available
 from ctdcast.readers.ladcp import find_ladcp_file
 from ctdcast.reports import _figdebug
-from ctdcast.reports._cast import generate_station_page
 from ctdcast.reports._env import get_template
-from ctdcast.reports._manifest import (
-    Panel,
-    PanelGroup,
-    Profile,
-    ResolvedReport,
-    Section,
-    resolve,
-)
 from ctdcast.reports._navs import inventory_pills, inventory_sources, nav_for
 from ctdcast.reports._plots import (
     RenderedPanel,
@@ -56,14 +48,26 @@ from ctdcast.reports._plots import (
     _make_section_ts_histogram_b64,
     _make_station_map_b64,  # noqa: F401 — kept for backward compat
 )
-from ctdcast.reports._qc import qc_summary
-from ctdcast.reports._report_css import _JS_TOP_LINKS, SHARED_CSS
-from ctdcast.reports._section import generate_section_page
-from ctdcast.reports._timeseries import generate_timeseries_page
+from ctdcast.reports._vendored.page_model import (
+    Panel,
+    PanelGroup,
+    Profile,
+    ResolvedReport,
+    Section,
+    resolve,
+)
+from ctdcast.reports.cast import generate_station_page
+from ctdcast.reports.design import _JS_TOP_LINKS, SHARED_CSS
+from ctdcast.reports.qc_tables import qc_summary
+from ctdcast.reports.section import generate_section_page
+from ctdcast.reports.timeseries import generate_timeseries_page
 
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
+
+__all__ = ["report"]
 
 
 def report(
@@ -153,7 +157,7 @@ def report(
     trim_soak:
         If True, apply pre-soak detection on each cast: cut the first 60 s
         (pump activation) and any records up to the last near-surface record
-        after pump-on.  Passed through to :func:`~ctdcast.reports._cast.generate_station_page`.
+        after pump-on.  Passed through to :func:`~ctdcast.reports.cast.generate_station_page`.
     dbar_step:
         Subsample the pressure axis by this step for section and timeseries
         plots (default 1, full 1-dbar resolution).  ``build_profiles()``
@@ -162,7 +166,7 @@ def report(
         If True, a cast-page section that applies but whose figures all failed
         to render is dropped and the survivors renumber over it, instead of
         keeping the heading with an "unavailable" placeholder.  Passed through
-        to :func:`~ctdcast.reports._cast.generate_station_page`.
+        to :func:`~ctdcast.reports.cast.generate_station_page`.
 
     Returns
     -------
@@ -538,7 +542,7 @@ def report(
             _href = f"{_src.stem}_inventory.html"
             _t0 = perf_counter()
             try:
-                from ctdcast.reports._dataset import generate_dataset_page
+                from ctdcast.reports.dataset import generate_dataset_page
 
                 generate_dataset_page(
                     _src,
@@ -644,7 +648,7 @@ def report(
 
     if gen["map"]:
         try:
-            from ctdcast.reports._leaflet import generate_leaflet_map
+            from ctdcast.reports.cruise_map import generate_leaflet_map
 
             lf_out = generate_leaflet_map(
                 all_meta,
@@ -800,31 +804,48 @@ def _write_index(
             vmin = vmin_override or {}
             vmax = vmax_override or {}
 
-            def _idx_panel(var: str, label: str) -> RenderedPanel:
+            def _idx_panel(var: str) -> RenderedPanel:
+                # Resolve the single/dual-sensor form actually present (e.g. a
+                # single-oxygen cruise stores plain ``ctd_oxygen``, not
+                # ``ctd_oxygen_1``), the way the section page does — otherwise the
+                # overview silently drops a variable it holds under the other form.
+                resolved = resolve_sensor_var(ds_sorted, var)
+                # An override may be keyed by the resolved name or by the registry
+                # name (`var`); honour the resolved form first, then fall back to
+                # the registry key, the way the section page does — otherwise an
+                # override set under `ctd_oxygen_1` is dropped on the overview.
+                _vmin = (
+                    vmin.get(resolved)
+                    if vmin.get(resolved) is not None
+                    else vmin.get(var)
+                )
+                _vmax = (
+                    vmax.get(resolved)
+                    if vmax.get(resolved) is not None
+                    else vmax.get(var)
+                )
                 b64 = _make_overview_panel_b64(
                     ds_sorted,
-                    var,
-                    label,
+                    resolved,
+                    vlabel(resolved),
                     bathy_depths=bathy,
                     style=section_style,
-                    vmin=vmin.get(var),
-                    vmax=vmax.get(var),
+                    vmin=_vmin,
+                    vmax=_vmax,
                     cast_groups=cast_groups,
                     cfg=cfg,
                 )
                 # title is the panel's HTML caption on index.html, so use the
                 # HTML-ready label (mathtext subscripts rendered as Unicode).
-                return RenderedPanel(b64=b64, title=vlabel_html(var), short=var)
+                return RenderedPanel(
+                    b64=b64, title=vlabel_html(resolved), short=resolved
+                )
 
             physics_panels_idx = tuple(
-                p
-                for p in (_idx_panel(v, vlabel(v)) for v in SECTION_PHYSICS_VARS)
-                if p.b64
+                p for p in (_idx_panel(v) for v in SECTION_PHYSICS_VARS) if p.b64
             )
             biogeo_panels_idx = tuple(
-                p
-                for p in (_idx_panel(v, vlabel(v)) for v in SECTION_BIOGEO_VARS)
-                if p.b64
+                p for p in (_idx_panel(v) for v in SECTION_BIOGEO_VARS) if p.b64
             )
 
             _ts_b64 = _make_section_ts_histogram_b64(ds_sorted, cfg=cfg)
@@ -1059,7 +1080,7 @@ def _make_clock_section(
     from ctdcast.config.cnv_header import header_from_raw_metadata, parse_start_time
     from ctdcast.plotters.plots import draw_clock_offset_fig
     from ctdcast.processors.stage_layout import group_by_cast
-    from ctdcast.reports._encode import render_b64
+    from ctdcast.reports._vendored.figure_png import render_b64
 
     # Discover casts the same way clock_offsets does (nested, flat, or stage-2/3-only trees); absent
     # only when there are no casts at all, in which case the section is simply not shown.
