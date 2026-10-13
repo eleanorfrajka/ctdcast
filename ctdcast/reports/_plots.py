@@ -62,7 +62,11 @@ from ctdcast.readers.ladcp import find_ladcp_file, read_ladcp
 from ctdcast.reports._figdebug import record as _figdebug_record
 from ctdcast.reports._figdebug import render_b64
 from ctdcast.reports._vendored import design_tokens as report_tokens
-from ctdcast.reports._vendored.figure_png import _fig_to_base64
+from ctdcast.reports._vendored.figure_png import (
+    _fig_to_base64,
+    record_source,
+    source_for,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -432,6 +436,9 @@ def _make_ladcp_section_b64(
                 fig.tight_layout()
                 _panel_b64 = _fig_to_base64(fig)
                 _figdebug_record(_panel_b64, "_make_ladcp_section_b64", fig)
+                # Drawn inline in this adapter, not by a draw_* function — so the honest
+                # source is the maker itself (self-updates when R6 moves it to plotters/).
+                record_source(_panel_b64, source_for(_make_ladcp_section_b64))
                 panels.append(
                     RenderedPanel(b64=_panel_b64, title=panel_title, short=panel_short)
                 )
@@ -606,6 +613,9 @@ def _make_ladcp_overview_b64(
                 fig.tight_layout()
                 _panel_b64 = _fig_to_base64(fig)
                 _figdebug_record(_panel_b64, "_make_ladcp_overview_b64", fig)
+                # Drawn inline in this adapter, not by a draw_* function — so the honest
+                # source is the maker itself (self-updates when R6 moves it to plotters/).
+                record_source(_panel_b64, source_for(_make_ladcp_overview_b64))
                 panels.append(
                     RenderedPanel(b64=_panel_b64, title=panel_title, short=panel_short)
                 )
@@ -806,6 +816,7 @@ def _make_all_sections_map_b64(
             # hand-placed axes) and no bbox crop (which would break the slot width).
             b64 = _fig_to_base64(fig_result)
             _figdebug_record(b64, "_make_all_sections_map_b64", fig_result)
+            record_source(b64, source_for(draw_all_sections_map_fig))
             return b64
     except Exception:
         if report_tokens.RAISE_ON_PLOT_ERROR:
