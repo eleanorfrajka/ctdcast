@@ -22,7 +22,6 @@ vendored ``variables_tables`` macro, so it reads identically to the inventory pa
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +32,9 @@ from ctdcast._version import __version__ as _VERSION
 from ctdcast.readers.metadata import source_to_canonical
 from ctdcast.reports import design
 from ctdcast.reports._env import _env, get_template
+from ctdcast.reports._format import report_generated_at
 from ctdcast.reports._navs import nav_for
 from ctdcast.reports._vendored import nc_tables
-from ctdcast.reports._vendored.design_tokens import ROLE_ACCENT
 
 __all__ = ["data_ranges_markup", "generate_dataset_page", "read_dataset_meta"]
 
@@ -241,7 +240,7 @@ def _coverage_computed(ds: xr.Dataset) -> dict[str, dict[str, Any]]:
             continue
         delta_s = int((stated_t - computed_t) / np.timedelta64(1, "s"))
         out[key] = {
-            "value": str(computed_t).replace("T", " "),
+            "value": nc_tables.fmt_datetime(computed_t),
             "diff": "0 s" if delta_s == 0 else f"{delta_s:+d} s",
             "over": abs(delta_s) > tol["time"],
         }
@@ -283,7 +282,10 @@ def data_ranges_markup(nc_path: Path) -> str | None:
         return None
     with ds:
         groups, source = nc_tables.variables_rows(
-            ds, is_qc=design.is_qc, is_sensor=_is_sensor_var
+            ds,
+            is_qc=design.is_qc,
+            is_sensor=_is_sensor_var,
+            original_name_attrs=design.ORIGINAL_NAME_ATTRS,
         )
     if not groups:
         return None
@@ -297,7 +299,8 @@ def read_dataset_meta(nc_path: Path) -> dict[str, Any]:
     :mod:`~ctdcast.reports._vendored.nc_tables` builders (coordinates, variables grouped
     by dimension, scalars, the sensor catalog, grouped globals), keeping the owned
     ctdcast tables (QC exclusions, variable renaming, sensor linkage/channel) and the
-    coverage check alongside them.
+    coverage check alongside them.  A renamed variable's source name also rides each row
+    as ``original_name`` (the in-context ``original → name`` cell).
 
     Returns a dict with ``filename``, ``filesize``, ``dims``, ``summary`` (the headline
     counts), ``coords`` / ``variables`` / ``scalars`` / ``sensor_catalog`` / ``globals``
@@ -322,11 +325,18 @@ def read_dataset_meta(nc_path: Path) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — surface any backend error on the page
         return {"filename": nc_path.name, "error": str(exc)}
     with ds:
-        coord_rows, coord_src = nc_tables.coords_rows(ds)
-        var_groups, var_src = nc_tables.variables_rows(
-            ds, is_qc=design.is_qc, is_sensor=_is_sensor_var
+        coord_rows, coord_src = nc_tables.coords_rows(
+            ds, original_name_attrs=design.ORIGINAL_NAME_ATTRS
         )
-        scalar_rows, scalar_src = nc_tables.scalars_rows(ds, exclude=_is_sensor_var)
+        var_groups, var_src = nc_tables.variables_rows(
+            ds,
+            is_qc=design.is_qc,
+            is_sensor=_is_sensor_var,
+            original_name_attrs=design.ORIGINAL_NAME_ATTRS,
+        )
+        scalar_rows, scalar_src = nc_tables.scalars_rows(
+            ds, exclude=_is_sensor_var, original_name_attrs=design.ORIGINAL_NAME_ATTRS
+        )
         catalog_rows, catalog_src = nc_tables.sensor_rows(ds)
         global_groups, global_src = nc_tables.globals_rows(
             ds, extras=design.ATTR_GROUP_EXTRAS
@@ -340,14 +350,21 @@ def read_dataset_meta(nc_path: Path) -> dict[str, Any]:
         # through nc.variables_tables with the Length/Valid/Valid %/type columns the
         # science table has — owned code chooses the rows, the vendored macro owns the cells.
         linkage_groups, linkage_src = nc_tables.variables_rows(
-            ds, is_qc=design.is_qc, is_sensor=lambda n: not _is_linkage(n)
+            ds,
+            is_qc=design.is_qc,
+            include=_is_linkage,
+            original_name_attrs=design.ORIGINAL_NAME_ATTRS,
         )
         channel_groups, channel_src = nc_tables.variables_rows(
-            ds, is_qc=design.is_qc, is_sensor=lambda n: not _is_channel(n)
+            ds,
+            is_qc=design.is_qc,
+            include=_is_channel,
+            original_name_attrs=design.ORIGINAL_NAME_ATTRS,
         )
         # Source → canonical rename table, reconstructed from each variable's recorded
         # source name; sorted by canonical name.  source_to_canonical already drops
-        # identity entries (source == canonical).
+        # identity entries (source == canonical).  Kept alongside the per-row arrow: the
+        # section is the at-a-glance rename overview, the arrow the in-context detail.
         rename_map = dict(sorted(source_to_canonical(ds).items(), key=lambda kv: kv[1]))
         return {
             "filename": nc_path.name,
@@ -378,6 +395,7 @@ def generate_dataset_page(
     show_nav: bool = False,
     inventory_pills: list[dict[str, str]] | None = None,
     current_href: str = "",
+    generated_at: str | None = None,
 ) -> Path:
     """Render the netCDF inventory of *nc_path* to a self-contained HTML *out_path*.
 
@@ -403,6 +421,9 @@ def generate_dataset_page(
         (profiles/ladcp/sensors), rendered as a cross-navigation pill bar.
     current_href:
         The href of this page, rendered as the non-link active pill.
+    generated_at:
+        Page build stamp; ``None`` uses the current UTC time.  Threaded from
+        :func:`ctdcast.report` so one build stamps every page identically.
 
     Returns
     -------
@@ -428,9 +449,9 @@ def generate_dataset_page(
         js_top_links=design._JS_TOP_LINKS,
         nav_prefix=nav_prefix,
         nav=nav,
-        masthead_bg=ROLE_ACCENT.get("component", ""),
+        masthead_role="component",
         version=_VERSION,
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        generated_at=report_generated_at(generated_at),
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")

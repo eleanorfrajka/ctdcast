@@ -197,7 +197,9 @@ def test_summary_counts_exclude_keeps_data_count_honest():
     )
     assert counts["data_variables"] == 1  # only ctd_temperature
     assert counts["sensors"] == 1  # SENSOR_t
-    assert counts["excluded"] == 1  # sensor_temperature_1, not double-counted with sensors
+    assert (
+        counts["excluded"] == 1
+    )  # sensor_temperature_1, not double-counted with sensors
 
 
 def test_valid_cell_macro():
@@ -227,7 +229,11 @@ def test_minmax_cell_sort_keys():
     )
     html = tmpl.render(
         num={"v_min_raw": 5.0, "v_min": "5", "v_max": "10"},
-        dt={"v_min_raw": None, "v_min": "2026-07-09 10:00", "v_max": "2026-07-09 18:00"},
+        dt={
+            "v_min_raw": None,
+            "v_min": "2026-07-09 10:00",
+            "v_max": "2026-07-09 18:00",
+        },
         miss={"v_min_raw": None, "v_min": "—", "v_max": "—"},
     )
     assert 'data-sort="5.0"' in html  # numeric sorts on the raw min
@@ -259,7 +265,9 @@ def test_variables_tables_optional_drops_all_empty_columns():
     """A declared-optional column vanishes when no row in the group carries a value."""
     from ctdcast.reports._env import _env
 
-    ds = xr.Dataset({"sensor_x": ("N_PROF", np.array(["a", "b"]))})  # string, no units/range
+    ds = xr.Dataset(
+        {"sensor_x": ("N_PROF", np.array(["a", "b"]))}
+    )  # string, no units/range
     groups, src = nt.variables_rows(ds, is_qc=_is_qc)
     nc = (
         "{% import '_nc_tables.html' as nc with context %}"
@@ -282,7 +290,9 @@ def test_coords_and_scalars_tables_take_optional():
 
     ds = xr.Dataset(
         {"flag": ((), np.int8(1))},  # a scalar with no units
-        coords={"label": ("label", np.array(["a", "b"]))},  # string coord, no units/range
+        coords={
+            "label": ("label", np.array(["a", "b"]))
+        },  # string coord, no units/range
     )
     coord_rows, csrc = nt.coords_rows(ds)
     scalar_rows, ssrc = nt.scalars_rows(ds)
@@ -295,6 +305,106 @@ def test_coords_and_scalars_tables_take_optional():
     )
     assert "Units</th>" not in html
     assert "Min / Max</th>" not in html
+
+
+def test_optional_stdname_drops_empty_standard_long_name_column():
+    """The Standard / long name column drops when `stdname` is optional and all rows lack it."""
+    from ctdcast.reports._env import _env
+
+    ds = xr.Dataset({"sensor_x": ("N_PROF", np.array(["a", "b"]))})  # no std/long name
+    groups, src = nt.variables_rows(ds, is_qc=_is_qc)
+    dropped = _env.from_string(
+        "{% import '_nc_tables.html' as nc with context %}"
+        "{{ nc.variables_tables(groups, optional=('stdname',), source=src) }}"
+    ).render(groups=groups, src=src, show_source=False)
+    assert "Standard / long name</th>" not in dropped
+
+    # a populated long_name keeps the column even when stdname is opted-in
+    ds2 = xr.Dataset({"temp": ("N_PROF", np.array([1.0, 2.0]))})
+    ds2["temp"].attrs["long_name"] = "temperature"
+    groups2, src2 = nt.variables_rows(ds2, is_qc=_is_qc)
+    kept = _env.from_string(
+        "{% import '_nc_tables.html' as nc with context %}"
+        "{{ nc.variables_tables(groups, optional=('stdname',), source=src) }}"
+    ).render(groups=groups2, src=src2, show_source=False)
+    assert "Standard / long name</th>" in kept
+
+
+def test_value_and_names_cells_are_wrappable():
+    """The scalar Value cell and the standard/long-name cell carry the wrap class.
+
+    A long unbroken token (a ``tracking_id``, a dotted ``standard_name``) must break inside
+    the cell instead of widening the whole table.
+    """
+    from ctdcast.reports._env import _env
+
+    ds = xr.Dataset({"tracking_id": ((), "x" * 60)})  # a long unbroken scalar value
+    rows, src = nt.scalars_rows(ds)
+    html = _env.from_string(
+        "{% import '_nc_tables.html' as nc with context %}"
+        "{{ nc.scalars_table(rows, source=src) }}"
+    ).render(rows=rows, src=src, show_source=False)
+    assert html.count('class="cell-wrap"') >= 1
+
+
+def test_numbered_adds_a_sortable_index_column():
+    """`numbered=True` prepends a `#` column; the default omits it."""
+    from ctdcast.reports._env import _env
+
+    ds = xr.Dataset(
+        {"a": ("x", np.array([1.0, 2.0])), "b": ("x", np.array([3.0, 4.0]))}
+    )
+    groups, src = nt.variables_rows(ds, is_qc=_is_qc)
+    numbered = _env.from_string(
+        "{% import '_nc_tables.html' as nc with context %}"
+        "{{ nc.variables_tables(groups, source=src, numbered=True) }}"
+    ).render(groups=groups, src=src, show_source=False)
+    assert ">#</th>" in numbered
+    plain = _env.from_string(
+        "{% import '_nc_tables.html' as nc with context %}"
+        "{{ nc.variables_tables(groups, source=src) }}"
+    ).render(groups=groups, src=src, show_source=False)
+    assert ">#</th>" not in plain
+
+
+def test_globals_requirement_column_is_opt_in():
+    """globals_rows(requirement=...) emits 4-tuples and globals_tables adds a Requirement column."""
+    from ctdcast.reports._env import _env
+
+    ds = xr.Dataset(attrs={"title": "t", "Conventions": "CF-1.13"})
+    groups, _ = nt.globals_rows(ds, requirement={"title": "required"})
+    rows = [r for _title, grp in groups for r in grp]
+    title_row = next(r for r in rows if r[0] == "title")
+    assert title_row[3] == "required"  # mapped attr carries its label
+    conv_row = next(r for r in rows if r[0] == "Conventions")
+    assert conv_row[3] == ""  # unmapped attr gets an empty label, not dropped
+    html = _env.from_string(
+        "{% import '_nc_tables.html' as nc with context %}{{ nc.globals_tables(groups) }}"
+    ).render(groups=groups, show_source=False)
+    assert ">Requirement</th>" in html and "required" in html
+
+    # default (no requirement) stays (attr, type, value) triples with no column
+    groups_plain, _ = nt.globals_rows(ds)
+    assert all(len(r) == 3 for _t, grp in groups_plain for r in grp)
+    plain = _env.from_string(
+        "{% import '_nc_tables.html' as nc with context %}{{ nc.globals_tables(groups) }}"
+    ).render(groups=groups_plain, show_source=False)
+    assert ">Requirement</th>" not in plain
+
+
+def test_name_cell_puts_original_on_its_own_muted_line():
+    """A renamed variable shows `<orig> →` on its own `.var-orig` line above the canonical name."""
+    from ctdcast.reports._env import _env
+
+    html = _env.from_string(
+        "{% import '_nc_tables.html' as nc with context %}{{ nc.name_cell(row) }}"
+    ).render(
+        row={"name": "ctd_temperature_1", "original_name": "t090C", "has_qc": False},
+        show_source=False,
+    )
+    assert 'class="var-orig"' in html
+    assert "t090C" in html and "ctd_temperature_1" in html
+    assert "<br>" in html  # original and canonical name are on separate lines
 
 
 def test_coverage_caption_only_when_a_cell_ambers():
@@ -353,3 +463,148 @@ def test_import_purity_package_neutral():
             if top not in allowed_top:
                 offenders.append(node.module)
     assert offenders == [], f"non-neutral imports: {offenders}"
+
+
+def test_variables_rows_include_and_original_name():
+    """include= keeps only accepted names; original_name_attrs surfaces the source name."""
+    ds = xr.Dataset(
+        {
+            "keep_me": ("x", np.arange(3.0), {"cnv_original_name": "raw0"}),
+            "drop_me": ("x", np.arange(3.0)),
+        }
+    )
+    groups, _ = nt.variables_rows(
+        ds,
+        is_qc=lambda _n, _d: False,
+        include=lambda n: n == "keep_me",
+        original_name_attrs=("cnv_original_name",),
+    )
+    rows = [r for _t, g in groups for r in g]
+    assert [r["name"] for r in rows] == ["keep_me"]
+    assert rows[0]["original_name"] == "raw0"
+
+
+def test_fmt_datetime_whole_ms_and_nat():
+    """fmt_datetime renders whole seconds, keeps ms when non-zero, and NaT → em-dash."""
+    assert (
+        nt.fmt_datetime(np.datetime64("2020-01-19T20:30:00")) == "2020-01-19 20:30:00"
+    )
+    assert (
+        nt.fmt_datetime(np.datetime64("2020-01-19T20:30:00.123"))
+        == "2020-01-19 20:30:00.123"
+    )
+    assert nt.fmt_datetime(np.datetime64("NaT")) == "—"
+
+
+def test_sensor_rows_reads_og1_serial_with_legacy_fallback():
+    """sensor_rows reads the OG1 ``sensor_serial_number``, falling back to legacy ``serial_number``."""
+    og1 = xr.Dataset(
+        {
+            "SENSOR_ctd_temperature": (
+                (),
+                np.int8(0),
+                {"sensor_model": "SBE3", "sensor_serial_number": "SN-OG1"},
+            )
+        }
+    )
+    rows, _ = nt.sensor_rows(og1)
+    assert rows[0]["serial"] == "SN-OG1"
+    legacy = xr.Dataset(
+        {
+            "SENSOR_ctd_temperature": (
+                (),
+                np.int8(0),
+                {"sensor_model": "SBE3", "serial_number": "SN-LEGACY"},
+            )
+        }
+    )
+    rows2, _ = nt.sensor_rows(legacy)
+    assert rows2[0]["serial"] == "SN-LEGACY"
+
+
+def test_qc_marker_shows_the_files_own_suffix():
+    """The (_QC) marker carries the companion's actual name, so its suffix matches the file.
+
+    ctdcast writes ``{var}_qc`` (lowercase); an OG1 file writes ``{var}_QC``. The row carries
+    ``qc_name`` and the template renders the suffix verbatim, never a hard-coded spelling.
+    """
+    ds = xr.Dataset(
+        {
+            "temp": ("x", np.arange(3.0)),
+            "temp_qc": ("x", np.array([1, 1, 3], np.int8)),  # ctdcast lowercase
+            "sal": ("x", np.arange(3.0)),
+            "sal_QC": ("x", np.array([1, 1, 1], np.int8)),  # OG1 uppercase
+        }
+    )
+    groups, _ = nt.variables_rows(ds, is_qc=lambda n, _d: n.lower().endswith("_qc"))
+    by = {r["name"]: r for _t, g in groups for r in g}
+    assert by["temp"]["qc_name"] == "temp_qc"
+    assert by["sal"]["qc_name"] == "sal_QC"
+
+
+def test_qc_flag_label_and_value_token_sets_match():
+    """QC_FLAG_LABELS and _QC_FLAG_VALUE cover the same tokens, so the two cannot drift."""
+    from ctdcast.reports._vendored import design_tokens as dt
+
+    assert set(dt.QC_FLAG_LABELS) == set(dt._QC_FLAG_VALUE)
+
+
+def _qc_dataset(flag_values, flag_meanings):
+    """A one-variable dataset with a QC companion carrying the given flag attrs."""
+    attrs = {}
+    if flag_values is not None:
+        attrs["flag_values"] = np.array(flag_values, dtype=np.int8)
+    if flag_meanings is not None:
+        attrs["flag_meanings"] = flag_meanings
+    return xr.Dataset(
+        {
+            "temp": ("t", np.arange(4.0)),
+            "temp_qc": ("t", np.array([1, 1, 3, 4], dtype=np.int8), attrs),
+        }
+    )
+
+
+def test_qc_flag_rows_declared_when_values_and_meanings_match():
+    """A well-formed companion (values + matching meanings) is declared, not amber."""
+    ds = _qc_dataset([1, 3, 4], "pass suspect_or_of_high_interest fail")
+    rows, _ = nt.qc_flag_rows(ds, is_qc=lambda n, _d: n.endswith("_qc"))
+    assert rows[0]["undeclared"] is False
+    assert [f["flag"] for f in rows[0]["flags"]] == [1, 3, 4]
+
+
+def test_qc_flag_rows_malformed_declaration_is_undeclared():
+    """flag_values with no / short flag_meanings → undeclared (raw-integer columns, amber)."""
+    no_meanings = _qc_dataset([1, 3, 4], None)
+    rows, _ = nt.qc_flag_rows(no_meanings, is_qc=lambda n, _d: n.endswith("_qc"))
+    assert rows[0]["undeclared"] is True  # no flag_meanings
+    short = _qc_dataset([1, 3, 4], "pass suspect")  # 2 meanings for 3 values
+    rows2, _ = nt.qc_flag_rows(short, is_qc=lambda n, _d: n.endswith("_qc"))
+    assert rows2[0]["undeclared"] is True  # length mismatch
+    # raw integer codes observed in the data become the columns
+    assert [f["flag"] for f in rows2[0]["flags"]] == [1, 3, 4]
+
+
+def test_qc_flag_rows_non_numeric_flag_values_is_undeclared():
+    """A non-numeric flag_values entry is malformed — undeclared, not a crash."""
+    ds = xr.Dataset(
+        {
+            "temp": ("t", np.arange(4.0)),
+            "temp_qc": (
+                "t",
+                np.array([1, 1, 3, 4], dtype=np.int8),
+                {"flag_values": np.array(["x", "y"]), "flag_meanings": "pass fail"},
+            ),
+        }
+    )
+    rows, _ = nt.qc_flag_rows(ds, is_qc=lambda n, _d: n.endswith("_qc"))
+    assert rows[0]["undeclared"] is True
+    assert [f["flag"] for f in rows[0]["flags"]] == [1, 3, 4]
+
+
+def test_original_name_identity_is_none():
+    """A source name equal to the current name shows no arrow (original_name is None)."""
+    ds = xr.Dataset({"v": ("x", np.arange(2.0), {"cnv_original_name": "v"})})
+    groups, _ = nt.variables_rows(
+        ds, is_qc=lambda _n, _d: False, original_name_attrs=("cnv_original_name",)
+    )
+    assert groups[0][1][0]["original_name"] is None

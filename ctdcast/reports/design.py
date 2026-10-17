@@ -20,14 +20,21 @@ from ctdcast.reports._vendored.design_tokens import (
     register_cmocean,
 )
 from ctdcast.reports._vendored.nc_tables import ATTR_GROUPS as _VENDORED_ATTR_GROUPS
+from ctdcast.reports._vendored.units_display import format_units
 
 #: ctdcast's package accent — chosen here, not in the vendored tokens.  Points at
 #: ``--ocean`` so the accent (wordmark, table header, footer rule) is ocean navy;
 #: change this one line to rebrand.  Any CSS colour value works.
 PACKAGE_ACCENT: str = "var(--ocean)"
 
+#: ctdcast's overrides on the vendored UI-token defaults — recolours a page role (nav pill +
+#: masthead together, ``role-<key>``), the ``(_QC)`` marker (``qc-mark``), or ``package-accent``.
+#: Empty: ctdcast keeps the family colours.  Each key must be an overridable token (an unknown key
+#: raises in ``emit_css``); data palettes (QC flag colours, track colours, colormaps) are not here.
+CSS_OVERRIDES: dict[str, str] = {}
+
 #: The generated stylesheet, ready to concatenate into a page ``<style>`` block.
-SHARED_CSS: str = emit_css(PACKAGE_ACCENT)
+SHARED_CSS: str = emit_css(PACKAGE_ACCENT, overrides=CSS_OVERRIDES)
 
 #: ctdcast turns the per-figure ``source:`` caption ON; the vendored default
 #: (``design_tokens.SHOW_FIGURE_SOURCE``) is OFF.  This is the package override —
@@ -66,6 +73,50 @@ COVERAGE_TOLERANCE: dict[str, float] = {
 #: Per-table-kind column widths for the inventory page (``{"variables": [...], ...}``);
 #: empty means the browser lays every table out.  Deferred until a column misbehaves.
 TABLE_WIDTHS: dict[str, list[str]] = {}
+
+#: Attribute names, in priority order, that record a variable's source name for the
+#: ``original → name`` cell in the inventory tables.  ``cnv_original_name`` is written by the
+#: CNV reader and ``source_variable`` by the LADCP reader; ``original_name`` is the family-shared
+#: spelling the siblings write.  The first present and non-empty wins.
+ORIGINAL_NAME_ATTRS: tuple[str, ...] = (
+    "original_name",
+    "cnv_original_name",
+    "source_variable",
+)
+
+#: ctdcast's exact-units-string → label overrides on the vendored family defaults.
+#: Empty: ctdcast takes the vendored display form for every unit (the registry's
+#: ``label_units`` column equals :func:`unit_label` for every entry, pinned by a
+#: test).  Add a ``units -> label`` entry here to pin a ctdcast-specific label the
+#: family rule does not produce, without touching the shared table — the same
+#: pattern as :data:`CMAP_OVERRIDES`.
+UNIT_LABEL_OVERRIDES: dict[str, str] = {}
+
+
+def unit_label(units: str, standard_name: str | None = None) -> str:
+    """Return the display label for a units string, with ctdcast's overrides applied.
+
+    Wraps the vendored :func:`~ctdcast.reports._vendored.units_display.format_units` with
+    ctdcast's :data:`UNIT_LABEL_OVERRIDES`.  Intended as the single override-aware display-unit
+    entry point, but the plot path (``vlabel``/``vunit`` in :mod:`ctdcast.config.parameters`)
+    calls ``format_units`` directly, so an override added here does not yet reach a figure —
+    converging the two on a single override-aware call is deferred to the units-canonicalisation
+    work.  The overrides are empty today, so the two agree; a pin test holds the registry's
+    ``label_units`` to this.
+
+    Parameters
+    ----------
+    units : str
+        CF/UDUNITS units string (e.g. ``"mS cm-1"``).
+    standard_name : str or None, optional
+        CF standard name, for the dimensionless turbidity / salinity labels.
+
+    Returns
+    -------
+    str
+        The display units string; ``""`` when *units* is empty.
+    """
+    return format_units(units, standard_name, overrides=UNIT_LABEL_OVERRIDES)
 
 
 def is_qc(name: str, _ds: object = None) -> bool:
@@ -193,11 +244,15 @@ __all__ = [
     "FIGURE_SOURCE",
     "PACKAGE_ACCENT",
     "SHARED_CSS",
+    "CSS_OVERRIDES",
+    "ORIGINAL_NAME_ATTRS",
     "TABLE_WIDTHS",
+    "UNIT_LABEL_OVERRIDES",
     "VAR_CMAPS",
     "_JS_SORT_TABLES",
     "_JS_TOP_LINKS",
     "cmap_for",
     "is_qc",
     "is_sensor",
+    "unit_label",
 ]
