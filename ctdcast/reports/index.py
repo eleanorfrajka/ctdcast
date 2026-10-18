@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -18,7 +18,7 @@ from ctdcast.analysis.derive import derive_AOU as add_aou
 from ctdcast.analysis.derive import derive_teos10_profiles as add_teos10_profiles
 from ctdcast.analysis.geometry import distance_from_km
 from ctdcast.config.global_attrs import cruise_name
-from ctdcast.config.loader import SectionsConfig
+from ctdcast.config.loader import SectionsConfig, warn_section_yaml_deprecated
 from ctdcast.config.parameters import (
     SECTION_BIOGEO_VARS,
     SECTION_PHYSICS_VARS,
@@ -182,8 +182,10 @@ def report(
 
     """
     # `groupings_yaml` names what the file actually holds -- sections *and*
-    # timeseries.  `section_yaml` named half of it; still accepted so an existing
-    # caller keeps working.
+    # timeseries.  `section_yaml` named half of it; accepted with a deprecation
+    # warning until 0.5.0 (same notice as the config-key path in config.loader).
+    if groupings_yaml is None and section_yaml is not None:
+        warn_section_yaml_deprecated()
     groupings_yaml = groupings_yaml or section_yaml
 
     cfg = config if config is not None else DEFAULT_REPORT_CONFIG
@@ -1585,7 +1587,7 @@ def _fmt_mtime(path: Path) -> str:
     """Return a compact local datetime string for *path*'s mtime, or ``"missing"``."""
     try:
         return (
-            datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
             .astimezone()
             .strftime("%Y-%m-%d %H:%M")
         )

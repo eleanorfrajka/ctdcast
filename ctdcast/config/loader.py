@@ -3,11 +3,27 @@
 from __future__ import annotations
 
 import copy
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def warn_section_yaml_deprecated() -> None:
+    """Warn that ``section_yaml`` is deprecated in favour of ``groupings_yaml``.
+
+    The single notice for the config-key spelling and the ``report()`` / ``init`` parameter
+    spelling, so every entry point that still honours ``section_yaml`` emits the same
+    ``DeprecationWarning`` naming the replacement and the removal version (0.5.0).
+    """
+    warnings.warn(
+        "`section_yaml` is deprecated and will be removed in 0.5.0; use `groupings_yaml` "
+        "(the file holds both sections: and timeseries:).",
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 def groupings_path(data: dict[str, Any] | None) -> Path | None:
@@ -17,7 +33,7 @@ def groupings_path(data: dict[str, Any] | None) -> Path | None:
     against distance) and ``timeseries:`` (repeat stations plotted against time)
     -- so ``groupings_yaml`` is the key, and ``ctd_groupings.yaml`` the
     conventional filename. ``section_yaml`` named only half of what the file
-    does; it stays accepted so existing configs keep working.
+    does; it stays accepted, with a ``DeprecationWarning``, until 0.5.0.
 
     Parameters
     ----------
@@ -30,7 +46,10 @@ def groupings_path(data: dict[str, Any] | None) -> Path | None:
         The path, or ``None`` when neither key is set.
     """
     d = data or {}
-    value = d.get("groupings_yaml") or d.get("section_yaml")
+    value = d.get("groupings_yaml")
+    if value is None and d.get("section_yaml"):
+        warn_section_yaml_deprecated()
+        value = d.get("section_yaml")
     return Path(str(value)) if value else None
 
 

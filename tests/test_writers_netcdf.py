@@ -1,6 +1,7 @@
 """Tests for ctdcast.writers.netcdf — CF-compliant netCDF writer."""
 
 import numpy as np
+import pytest
 import xarray as xr
 from conftest import CAST_011
 
@@ -20,6 +21,30 @@ class TestWrite:
         write(ds, out)
         assert out.exists()
         assert out.stat().st_size > 0
+
+    def test_write_aborts_on_unrecognised_units(self, tmp_path):
+        """A registered variable's present-but-unrecognised units aborts the write, no file left.
+
+        Covers the writer's canonicalisation guard: ``to_canonical_units`` raises ``UnitsError``,
+        which ``write`` re-raises naming the output file, and nothing is written to disk.
+        """
+        from ctdcast.processors.units import UnitsError
+        from ctdcast.writers.netcdf import write
+
+        ds = xr.Dataset(
+            {
+                "ctd_temperature_1": (
+                    "time",
+                    np.array([10.0, 11.0]),
+                    {"units": "nonsense"},
+                )
+            },
+            coords={"time": np.array([0, 1])},
+        )
+        out = tmp_path / "bad.nc"
+        with pytest.raises(UnitsError, match=r"ctd_temperature_1.*nonsense.*bad\.nc"):
+            write(ds, out)
+        assert not out.exists()
 
     def test_no_tmp_file_left_behind(self, tmp_path):
         from ctdcast.writers.netcdf import write
@@ -52,14 +77,26 @@ class TestWrite:
             assert "units" in ds_back["temperature_1"].attrs
         ds_back.close()
 
-    def test_known_variable_gets_label_units(self, tmp_path):
+    def test_known_variable_gets_canonical_units_not_label_units(self, tmp_path):
+        """The writer stamps the canonical ``units`` and does not add ``label_units``.
+
+        A fresh dataset (no ``label_units``) is used: the writer no longer writes the attribute,
+        so a variable that arrives without one still has none.  (An old file that already carries
+        ``label_units`` keeps it — the writer does not strip existing attributes.)
+        """
+        import numpy as np
+
         from ctdcast.writers.netcdf import write
 
-        ds = _load(CAST_011)
+        ds = xr.Dataset(
+            {"ctd_salinity_1": ("time", np.array([35.0, 35.1]), {"units": "1"})},
+            coords={"time": np.array([0, 1])},
+        )
         out = tmp_path / "test.nc"
         write(ds, out)
         ds_back = xr.open_dataset(out, engine="netcdf4")
-        assert ds_back["ctd_salinity_1"].attrs.get("label_units") == "PSU"
+        assert ds_back["ctd_salinity_1"].attrs.get("units") == "1"
+        assert "label_units" not in ds_back["ctd_salinity_1"].attrs
         ds_back.close()
 
     def test_per_cast_file_defaults_to_provisional_data_mode(self, tmp_path):

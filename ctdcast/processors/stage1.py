@@ -45,7 +45,7 @@ from ctdcast.config.sensors import (
     role_base,
 )
 from ctdcast.identity import cast_id_from_name, format_cast_id
-from ctdcast.processors._warnings import summarise_warnings
+from ctdcast.processors._warnings import warning_summary
 from ctdcast.processors.history import (
     PL_CONVERTED,
     add_processing_level,
@@ -62,6 +62,26 @@ from ctdcast.writers.netcdf import write as write_nc
 
 # Coordinate variables that _normalise must not warn about as kept-unknowns.
 _KEEP_COORDS: frozenset[str] = frozenset({"latitude", "longitude", "time"})
+
+# Oxygen per-volume spellings a reader may emit (SBE `Mm/L` columns).  Converted to the
+# canonical per-mass `umol kg-1` in Step 1b using SBE density — a per-sample (variable) factor,
+# so it is a stage step, not a constant-factor units alias.  Evidence:
+# tests/fixtures/oxy/msm_142_1_056_1sec.cnv:37-38 sbeox0/1Mm/L: Oxygen, SBE 43 [umol/l].
+_OXYGEN_PER_VOLUME_UNITS: frozenset[str] = frozenset({"umol/l", "µmol/l", "umol l-1"})
+
+# Raw-voltage spellings for an SBE 43 oxygen channel seasenselib hands back under an oxygen
+# name (`sbeoxNV [V]`).  seasenselib emits `volts`; `v`/`volt` are admitted defensively.  Step 1b
+# stamps the canonical `V` itself so the channel reaches the writer canonical — the branch's
+# accept-set cannot then disagree with the units table about which spelling resolves to `V`.
+_OXYGEN_VOLTAGE_UNITS: frozenset[str] = frozenset({"v", "volt", "volts"})
+
+# Per-mass oxygen spellings a reader may emit; the channel is the basic measured value
+# (ctd_oxygen_N), already per-mass, so no conversion.  Includes the canonical spaced form
+# `umol kg-1` so a non-normalising backend emitting the canonical is classified here, not
+# dropped to the saturation branch.  seasenselib emits the slash form `umol/kg`.
+_OXYGEN_PER_MASS_UNITS: frozenset[str] = frozenset(
+    {"umol/kg", "µmol/kg", "umol kg-1", "µmol kg-1"}
+)
 
 
 def _normalise(ds: xr.Dataset, cruise_info: dict | None = None) -> xr.Dataset:
@@ -114,9 +134,9 @@ def _normalise(ds: xr.Dataset, cruise_info: dict | None = None) -> xr.Dataset:
     ds = ds.copy()
 
     # Step 1: rename via CNV_ALIASES (lowercase key lookup).  The reader
-    # (seasenselib) records the raw column name per variable as
-    # ``cnv_original_name``, so the source→canonical provenance survives these
-    # renames without any extra bookkeeping here.
+    # (seasenselib) records the raw column name per variable, consolidated to
+    # ``original_name`` at the end of this function, so the source→canonical
+    # provenance survives these renames without any extra bookkeeping here.
     rename_map: dict[str, str] = {}
     _claimed_by: dict[str, str] = {}
     for var in list(ds.data_vars):
@@ -133,7 +153,7 @@ def _normalise(ds: xr.Dataset, cruise_info: dict | None = None) -> xr.Dataset:
             _winner = _claimed_by.get(target, target)
             warnings.warn(
                 f"two columns map to {target!r}: {_winner!r} won, {var!r} kept under its own "
-                f"name (cnv_original_name records the source). Anything derived from {target!r} "
+                f"name (original_name records the source). Anything derived from {target!r} "
                 "uses the winner.",
                 stacklevel=3,
             )
@@ -154,15 +174,25 @@ def _normalise(ds: xr.Dataset, cruise_info: dict | None = None) -> xr.Dataset:
             continue
         _suffix = "1" if _v in ("oxygen_1", "oxygen") else "2"
         _units = ds[_v].attrs.get("units", "").lower().strip()
-        if "umol/kg" in _units or "µmol/kg" in _units:
+        # The reader's standard_name describes the raw oxygen channel, but we are about to
+        # reclassify it (per-mass measurement / % saturation / raw voltage), so that name no
+        # longer fits — drop it and let the writer assign the right one from VARIABLES
+        # (ctd_oxygen_N -> moles-per-mass; the saturation/voltage channels carry none).  A
+        # reader that stamps a wrong name is otherwise trusted by to_canonical_units: seasenselib
+        # 0.6.1 labels a % saturation channel moles_of_oxygen_per_unit_mass_in_sea_water, which is
+        # a CANONICAL quantity (umol kg-1), so the saturation would resolve to umol kg-1 and abort.
+        ds[_v].attrs.pop("standard_name", None)
+        if any(_spelling in _units for _spelling in _OXYGEN_PER_MASS_UNITS):
             ds = ds.rename({_v: f"ctd_oxygen_{_suffix}"})
-        elif "umol/l" in _units or "µmol/l" in _units:
+        elif any(_spelling in _units for _spelling in _OXYGEN_PER_VOLUME_UNITS):
             if "sbe_density" in ds:
                 # sbe_density is kg/m³; divide by 1000 to get kg/L, then µmol/L / (kg/L) = µmol/kg.
                 rho = ds["sbe_density"] / 1000.0
                 converted = ds[_v] / rho
                 new_attrs = dict(ds[_v].attrs)
-                new_attrs["units"] = "umol/kg"
+                # Stamp the canonical per-mass spelling directly (not `umol/kg`, which the
+                # units pass would only then rewrite); the free-text comment records the method.
+                new_attrs["units"] = "umol kg-1"
                 new_attrs["comment"] = (
                     "converted from umol/l to umol/kg using SBE density"
                 )
@@ -176,7 +206,16 @@ def _normalise(ds: xr.Dataset, cruise_info: dict | None = None) -> xr.Dataset:
                     "convert it; kept under its source name.",
                     stacklevel=3,
                 )
+        elif _units in _OXYGEN_VOLTAGE_UNITS:
+            # A raw SBE 43 oxygen sensor voltage (sbeoxNV [V]) that seasenselib handed back
+            # under an oxygen name — not a saturation.  Route it to the raw voltage channel and
+            # stamp the canonical `V` so it reaches the writer canonical (not mislabelled
+            # `percent` — the latent bug the units guard surfaced — and not left as a spelling
+            # like `volt` the units table would then refuse).
+            ds = ds.rename({_v: f"oxygen_raw_{_suffix}"})
+            ds[f"oxygen_raw_{_suffix}"].attrs["units"] = "V"
         else:
+            # Anything else (% saturation) is the SBE-derived oxygen saturation.
             ds = ds.rename({_v: f"sbe_oxygen_saturation_{_suffix}"})
 
     # Step 1c: convert conductivity from S/m to mS/cm — the CCHDO/oceanographic
@@ -285,9 +324,9 @@ def _normalise(ds: xr.Dataset, cruise_info: dict | None = None) -> xr.Dataset:
     # header.  Records what the deck unit and SBE Data Processing did before ctdcast, so
     # a later stage cannot re-apply a correction already made.  No-op with no SBE header.
     # Structural advisories (pressure-gridded, asymmetric advance, system clock) are also
-    # raised as warnings; the batch collapses identical ones via summarise_warnings.
+    # raised as warnings; the batch collapses identical ones via warning_summary.
     # Conformance advisories (parameters that deviate from a documented reference) are a
-    # separate loop so summarise_warnings collapses each class on its own; a no-op for an
+    # separate loop so warning_summary collapses each class on its own; a no-op for an
     # empty header or an instrument outside the SBE 9 family.
     if header:
         ds.attrs.update(build_correction_ledger(header))
@@ -295,6 +334,18 @@ def _normalise(ds: xr.Dataset, cruise_info: dict | None = None) -> xr.Dataset:
             warnings.warn(advisory, stacklevel=2)
         for advisory in conformance_advisories(header):
             warnings.warn(advisory, stacklevel=2)
+
+    # Consolidate the source-name provenance onto the family-shared ``original_name``.
+    # seasenselib records it on the channels it maps and ``cnv_original_name`` on all of
+    # them; backfill ``original_name`` for the kept channels seasenselib did not map and drop
+    # the reader-specific ``cnv_original_name`` so ctdcast's files carry one spelling (the
+    # LADCP path writes ``original_name`` directly).  Readers of pre-0.4.0 files still resolve
+    # the old attrs via :data:`~ctdcast.readers.metadata._SOURCE_NAME_ATTRS`.
+    for _var in ds.variables:
+        _attrs = ds[_var].attrs
+        if "cnv_original_name" in _attrs:
+            _attrs.setdefault("original_name", _attrs["cnv_original_name"])
+            del _attrs["cnv_original_name"]
 
     return ds
 
@@ -446,7 +497,7 @@ class _SeasenselibBackend:
         except ImportError as exc:
             raise ImportError(
                 "seasenselib backend requested but the package is not installed. "
-                "Install it with: pip install seasenselib"
+                'Install it with: pip install "ctdcast[cnv]"'
             ) from exc
         self._sl = _sl
         # Suppress verbose output from pycnv/seasenselib at the logger level.
@@ -619,7 +670,7 @@ def stage1(
                 n += 1
             else:
                 print(f"  skip: {nc_path.name}")
-    summarise_warnings(caught)
+    warning_summary(caught)
     return n
 
 
