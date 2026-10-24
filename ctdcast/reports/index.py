@@ -298,7 +298,7 @@ def report(
             # just the raw data box, so the bathymetry fills each map instead of
             # leaving a grey border — most visible for a tall cruise, where the
             # square widens longitude well past the data.
-            from ctdcast.plotters.plots import (
+            from ctdcast.plotters.maps import (
                 _GEBCO_RENDER_PAD,
                 _square_map_limits,
             )
@@ -1101,7 +1101,7 @@ def _make_clock_section(
         suggested_config_yaml,
     )
     from ctdcast.config.cnv_header import header_from_raw_metadata, parse_start_time
-    from ctdcast.plotters.plots import draw_clock_offset_fig
+    from ctdcast.plotters.timeseries import draw_clock_offset_fig
     from ctdcast.processors.stage_layout import group_by_cast
     from ctdcast.reports._vendored.figure_png import render_b64
 
