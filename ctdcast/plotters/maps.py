@@ -294,6 +294,7 @@ def draw_station_map_fig(
     target_h: float = 4.5,  # noqa: ARG001
     *,
     cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_TWO_FIFTHS,
 ) -> plt.Figure | None:
     """Return a GEBCO map Figure with all casts and this cast highlighted."""
     all_lats = [m["lat"] for m in all_meta if np.isfinite(m.get("lat", np.nan))]
@@ -312,7 +313,7 @@ def draw_station_map_fig(
     )
     yl0, yl1, xl0, xl1 = _square_map_limits(yl0, yl1, xl0, xl1, cos_lat)
 
-    fig, ax, cax, _ = _map_layout(_W_TWO_FIFTHS, xl0, xl1, yl0, yl1, cos_lat)
+    fig, ax, cax, _ = _map_layout(width_in, xl0, xl1, yl0, yl1, cos_lat)
 
     map_panel(ax, cax, xl0, xl1, yl0, yl1, cfg=cfg)
 
@@ -345,6 +346,7 @@ def draw_cruise_map_fig(
     *,
     target_h: float = 4.0,  # noqa: ARG001
     cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_HALF,
 ) -> plt.Figure | None:
     """Return a Figure of all cast positions (no single-cast highlight)."""
     lats = [m["lat"] for m in all_meta if np.isfinite(m.get("lat", np.nan))]
@@ -367,7 +369,7 @@ def draw_cruise_map_fig(
     )
     yl0, yl1, xl0, xl1 = _square_map_limits(yl0, yl1, xl0, xl1, cos_lat)
 
-    fig, ax, cax, _ = _map_layout(_W_HALF, xl0, xl1, yl0, yl1, cos_lat)
+    fig, ax, cax, _ = _map_layout(width_in, xl0, xl1, yl0, yl1, cos_lat)
 
     map_panel(ax, cax, xl0, xl1, yl0, yl1, cfg=cfg)
 
@@ -491,6 +493,7 @@ def draw_all_sections_map_fig(
     *,
     target_h: float = 4.5,  # noqa: ARG001
     cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_HALF,
 ) -> plt.Figure | None:
     """Return a Figure showing all section tracks coloured by section."""
     if not sections_data:
@@ -515,7 +518,7 @@ def draw_all_sections_map_fig(
     ncol = min(len(sections_data), 3)
     legend_rows = math.ceil(len(sections_data) / ncol)
     fig, ax, cax, legend_top = _map_layout(
-        _W_HALF, xl0, xl1, yl0, yl1, cos_lat, legend_rows=legend_rows
+        width_in, xl0, xl1, yl0, yl1, cos_lat, legend_rows=legend_rows
     )
 
     map_panel(ax, cax, xl0, xl1, yl0, yl1, cfg=cfg)

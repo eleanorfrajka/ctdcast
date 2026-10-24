@@ -237,7 +237,10 @@ def draw_ladcp_section_fig(
 
 
 def draw_ladcp_bottomtrack_fig(
-    ladcp_path: Path | None, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ladcp_path: Path | None,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_THIRD,
 ) -> plt.Figure | None:
     """Return a LADCP bottom-track U and V vs depth Figure."""
     if ladcp_path is None:
@@ -253,7 +256,9 @@ def draw_ladcp_bottomtrack_fig(
     if not len(z):
         return None
 
-    fig, axes = plt.subplots(1, 2, sharey=True, figsize=(_W_THIRD, 1.8))
+    fig, axes = plt.subplots(
+        1, 2, sharey=True, figsize=(width_in, width_in * 1.8 / _W_THIRD)
+    )
 
     for ax, vel, xlabel, color in zip(
         axes,

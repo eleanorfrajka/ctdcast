@@ -200,6 +200,7 @@ def draw_section_ts_profiles_fig(
     x_vals: np.ndarray,
     *,
     cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_THIRD,
 ) -> plt.Figure | None:
     """Return a Figure of per-cast CT–SA profiles coloured by along-track distance."""
     if "absolute_salinity" not in ds_prof or "conservative_temperature" not in ds_prof:
@@ -223,7 +224,7 @@ def draw_section_ts_profiles_fig(
     cmap = plt.get_cmap("plasma", len(bounds) - 1)
     norm = mcolors.BoundaryNorm(bounds, ncolors=cmap.N)
 
-    fig, ax = plt.subplots(figsize=(_W_THIRD, 3.8))
+    fig, ax = plt.subplots(figsize=(width_in, width_in * 3.8 / _W_THIRD))
 
     for i in range(sa_all.shape[0]):
         mask = np.isfinite(sa_all[i]) & np.isfinite(ct_all[i])
@@ -262,7 +263,10 @@ def draw_section_ts_profiles_fig(
 
 
 def draw_ts_diagram_timeseries_fig(
-    ds_ts: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds_ts: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_THIRD,
 ) -> plt.Figure | None:
     """Return a CT–SA diagram Figure for all timeseries profiles, coloured by time."""
     if "absolute_salinity" not in ds_ts or "conservative_temperature" not in ds_ts:
@@ -292,7 +296,7 @@ def draw_ts_diagram_timeseries_fig(
     cmap = plt.get_cmap("plasma", len(bounds) - 1)
     norm = mcolors.BoundaryNorm(bounds, ncolors=cmap.N)
 
-    fig, ax = plt.subplots(figsize=(_W_THIRD, 3.8))
+    fig, ax = plt.subplots(figsize=(width_in, width_in * 3.8 / _W_THIRD))
 
     for i in range(sa_all.shape[0]):
         mask = np.isfinite(sa_all[i]) & np.isfinite(ct_all[i])
@@ -331,7 +335,10 @@ def draw_ts_diagram_timeseries_fig(
 
 
 def draw_section_ts_histogram_fig(
-    ds_prof: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds_prof: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_THIRD,
 ) -> plt.Figure | None:
     """Return a CT–SA 2-D count histogram Figure (log₁₀ colour) for section profiles."""
     if "absolute_salinity" not in ds_prof or "conservative_temperature" not in ds_prof:
@@ -365,7 +372,7 @@ def draw_section_ts_histogram_fig(
     cmap_c.set_bad("white")
     norm_c = mcolors.BoundaryNorm(bounds_c, ncolors=256)
 
-    fig, ax = plt.subplots(figsize=(_W_THIRD, 3.8))
+    fig, ax = plt.subplots(figsize=(width_in, width_in * 3.8 / _W_THIRD))
     pc = ax.pcolormesh(sa_c, ct_c, counts_log, cmap=cmap_c, norm=norm_c)
     _sigma0_backdrop(ax)
     cb = fig.colorbar(
@@ -390,7 +397,10 @@ def draw_section_ts_histogram_fig(
 
 
 def draw_section_ts_o2_fig(
-    ds_prof: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds_prof: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_THIRD,
 ) -> plt.Figure | None:
     """Return a CT–SA histogram Figure coloured by median O₂ saturation per bin."""
     _o2_var = next((v for v in ("oxygen_saturation", "oxsat_1") if v in ds_prof), None)
@@ -447,7 +457,7 @@ def draw_section_ts_o2_fig(
     cmap_o = plt.get_cmap("RdYlGn", len(bounds_o) - 1)
     norm_o = mcolors.BoundaryNorm(bounds_o, ncolors=cmap_o.N)
 
-    fig, ax = plt.subplots(figsize=(_W_THIRD, 3.8))
+    fig, ax = plt.subplots(figsize=(width_in, width_in * 3.8 / _W_THIRD))
     pc = ax.pcolormesh(sa_c, ct_c, o2_grid, cmap=cmap_o, norm=norm_o)
     _sigma0_backdrop(ax)
     cb = fig.colorbar(

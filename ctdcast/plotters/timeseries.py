@@ -54,6 +54,7 @@ def draw_clock_offset_fig(
     verdict: ClockVerdict,
     *,
     cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_FULL,
 ) -> plt.Figure | None:
     """Return a Figure of per-cast clock offset vs cast number, with segment means and changepoints.
 
@@ -69,7 +70,7 @@ def draw_clock_offset_fig(
     x = [cast_number(c.cast_id) for c in series]
     y = [c.offset_seconds for c in series]
 
-    fig, ax = plt.subplots(figsize=(_W_FULL, 4.0))
+    fig, ax = plt.subplots(figsize=(width_in, width_in * 4.0 / _W_FULL))
     ax.axhline(0, color="0.8", lw=pen("thinner"))  # zero-offset reference
     for seg in verdict.segments[1:]:  # changepoints (none for constant/drift)
         ax.axvline(cast_number(seg.first_cast), color="0.6", ls="--", lw=pen("thinner"))
@@ -255,7 +256,10 @@ def draw_timeseries_fig(
 
 
 def draw_sensor_diff_fig(
-    ds: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_TWOTHIRDS,
 ) -> plt.Figure | None:
     """Return a primary minus secondary sensor difference profiles Figure."""
     p = ds["pressure"].values
@@ -269,7 +273,9 @@ def draw_sensor_diff_fig(
         return None
 
     n_panels = int(has_t) + int(has_s)
-    fig, axes = plt.subplots(1, n_panels, figsize=(_W_TWOTHIRDS, 5.5), sharey=True)
+    fig, axes = plt.subplots(
+        1, n_panels, figsize=(width_in, width_in * 5.5 / _W_TWOTHIRDS), sharey=True
+    )
     if n_panels == 1:
         axes = [axes]
 
@@ -312,7 +318,10 @@ def draw_sensor_diff_fig(
 
 
 def draw_pressure_time_fig(
-    ds: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_THIRD,
 ) -> plt.Figure | None:
     """Return a pressure vs elapsed time Figure (cast trajectory + bottle stops)."""
     p = ds["pressure"].values
@@ -323,7 +332,7 @@ def draw_pressure_time_fig(
     else:
         elapsed_min = (t_raw.astype(float) - float(t_raw[0])) / 60.0
 
-    fig, ax = plt.subplots(figsize=(_W_THIRD, 3.7))
+    fig, ax = plt.subplots(figsize=(width_in, width_in * 3.7 / _W_THIRD))
     ax.plot(elapsed_min, p, color="k", linewidth=pen("thin"))
     max_p = float(np.nanmax(p))
     ax.set_ylim(max_p, 0)
@@ -335,7 +344,10 @@ def draw_pressure_time_fig(
 
 
 def draw_updown_diff_fig(
-    ds: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_FULL,
 ) -> plt.Figure | None:
     """Return a downcast minus upcast profiles Figure: ΔCT, ΔSA, Δσ₀."""
     ds_teos = add_teos10(ds)
@@ -379,7 +391,9 @@ def draw_updown_diff_fig(
     if not diffs:
         return None
 
-    fig, axes = plt.subplots(1, len(diffs), figsize=(_W_FULL, 5.5), sharey=True)
+    fig, axes = plt.subplots(
+        1, len(diffs), figsize=(width_in, width_in * 5.5 / _W_FULL), sharey=True
+    )
     if len(diffs) == 1:
         axes = [axes]
     for ax, diff, label, color in zip(axes, diffs, labels, colors, strict=True):

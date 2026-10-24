@@ -179,7 +179,10 @@ def draw_ts_density_fig(
 
 
 def draw_ts_diagram_fig(
-    ds: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_THIRD,
 ) -> plt.Figure | None:
     """Return a T-S diagram Figure colored by O₂ saturation."""
     ds_teos = add_teos10(ds)
@@ -209,7 +212,7 @@ def draw_ts_diagram_fig(
     cmap = plt.get_cmap("RdYlGn", len(bounds) - 1)
     norm = mcolors.BoundaryNorm(bounds, ncolors=cmap.N)
 
-    fig, ax = plt.subplots(figsize=(_W_THIRD, 3.8))
+    fig, ax = plt.subplots(figsize=(width_in, width_in * 3.8 / _W_THIRD))
 
     sc = ax.scatter(sa, ct, c=o2, cmap=cmap, norm=norm, s=6, alpha=0.8)
     _sigma0_backdrop(ax)
@@ -232,7 +235,10 @@ def draw_ts_diagram_fig(
 
 
 def draw_stability_fig(
-    ds: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_TWOTHIRDS,
 ) -> plt.Figure | None:
     """Return a N² and Turner angle (2-panel) Figure."""
     ds_teos = add_teos10(ds)
@@ -253,7 +259,9 @@ def draw_stability_fig(
         n2, p_n2 = gsw.Nsquared(sa, ct, p, lat=lat)
         tu, _, p_tu = gsw.Turner_Rsubrho(sa, ct, p, axis=0)
 
-    fig, axes = plt.subplots(1, 2, figsize=(_W_TWOTHIRDS, 5.5), sharey=True)
+    fig, axes = plt.subplots(
+        1, 2, figsize=(width_in, width_in * 5.5 / _W_TWOTHIRDS), sharey=True
+    )
     ax_n2, ax_tu = axes
 
     ax_n2.plot(n2, p_n2, color="k")
@@ -279,7 +287,10 @@ def draw_stability_fig(
 
 
 def draw_aux_profiles_fig(
-    ds: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_FULL,
 ) -> plt.Figure | None:
     """Return a O₂ sat, fluorescence, turbidity profiles Figure (downcast + pale upcast)."""
     vars_labels = [
@@ -301,7 +312,9 @@ def draw_aux_profiles_fig(
         return None
     ds_down, ds_up = split_cast(ds)
 
-    fig, axes = plt.subplots(1, len(available), figsize=(_W_FULL, 5.5), sharey=True)
+    fig, axes = plt.subplots(
+        1, len(available), figsize=(width_in, width_in * 5.5 / _W_FULL), sharey=True
+    )
     if len(available) == 1:
         axes = [axes]
 
@@ -329,7 +342,10 @@ def draw_aux_profiles_fig(
 
 
 def draw_ct_sa_sigma0_fig(
-    ds: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_FULL,
 ) -> plt.Figure | None:
     """Return a CT, SA, σ₀ profiles side-by-side Figure (downcast + grey upcast)."""
     ds_teos = add_teos10(ds)
@@ -344,7 +360,9 @@ def draw_ct_sa_sigma0_fig(
     if not available:
         return None
 
-    fig, axes = plt.subplots(1, len(available), figsize=(_W_FULL, 5.5), sharey=True)
+    fig, axes = plt.subplots(
+        1, len(available), figsize=(width_in, width_in * 5.5 / _W_FULL), sharey=True
+    )
     if len(available) == 1:
         axes = [axes]
 
@@ -383,7 +401,10 @@ def draw_ct_sa_sigma0_fig(
 
 
 def draw_ts_updown_fig(
-    ds: xr.Dataset, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    ds: xr.Dataset,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_TWO_FIFTHS,
 ) -> plt.Figure | None:
     """Return a CT–SA scatter Figure: downcast in blue, upcast in red, σ₀ contours."""
     ds_teos = add_teos10(ds)
@@ -414,7 +435,7 @@ def draw_ts_updown_fig(
     SA_g, CT_g = np.meshgrid(sa_g, ct_g)
     sig0_g = gsw.sigma0(SA_g, CT_g)
 
-    fig, ax = plt.subplots(figsize=(_W_TWO_FIFTHS, _W_TWO_FIFTHS))
+    fig, ax = plt.subplots(figsize=(width_in, width_in))
     cs = ax.contour(
         SA_g, CT_g, sig0_g, levels=8, colors=_SIGMA0_CONTOUR_COLOR, linewidths=0.6
     )
@@ -447,7 +468,10 @@ def draw_ts_updown_fig(
 
 
 def draw_qc_histogram_fig(
-    nc_path: Path, *, cfg: ReportConfig = DEFAULT_REPORT_CONFIG
+    nc_path: Path,
+    *,
+    cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float = _W_FULL,
 ) -> plt.Figure | None:
     """Return a per-variable data-value distribution Figure, or None.
 
@@ -467,6 +491,8 @@ def draw_qc_histogram_fig(
         Path to a per-cast stage file (stage 2 or 3, i.e. one carrying ``_qc``).
     cfg:
         The frozen report configuration; ``clean_spines`` drives the despine.
+    width_in:
+        Figure width in inches; each panel row's height scales with it.
     """
     with xr.open_dataset(nc_path, engine="netcdf4", decode_timedelta=False) as ds:
         ds.load()
@@ -484,7 +510,11 @@ def draw_qc_histogram_fig(
         ncols = min(3, len(panels))
         nrows = math.ceil(len(panels) / ncols)
         fig, axs_grid = plt.subplots(
-            nrows, ncols, figsize=(_W_FULL, 2.4 * nrows), squeeze=False, sharey=True
+            nrows,
+            ncols,
+            figsize=(width_in, width_in * 2.4 / _W_FULL * nrows),
+            squeeze=False,
+            sharey=True,
         )
         axs = axs_grid.ravel()
         for k in range(len(panels), len(axs)):
