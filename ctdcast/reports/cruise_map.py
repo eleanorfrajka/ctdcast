@@ -20,8 +20,10 @@ Interaction:
 from __future__ import annotations
 
 import base64
+import importlib.util
 import io
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +36,11 @@ from ctdcast.identity import expand_cast_numbers, format_cast_id
 from ctdcast.reports._env import get_template
 from ctdcast.reports._format import report_generated_at
 from ctdcast.reports._navs import nav_for
-from ctdcast.reports._vendored.leaflet import load_leaflet, safe_json
+from ctdcast.reports._vendored.leaflet import (
+    coastline_geojson,
+    load_leaflet,
+    safe_json,
+)
 from ctdcast.reports.design import SHARED_CSS
 
 _SECTION_COLOR_DEFAULT = "#7b2d8b"
@@ -55,8 +61,15 @@ def _cast_panel_html(
     m: dict[str, Any],
     section_name: str,
     section_url: str | None,
+    *,
+    with_links: bool = True,
 ) -> str:
-    """Return HTML for the info panel when a cast marker is hovered."""
+    """Return HTML for the info panel when a cast marker is hovered.
+
+    With ``with_links=False`` the trailing station/section links are omitted, for a
+    caller (the vendored ``track_map`` macro) that appends its own link from the
+    payload's ``href`` / ``link_label``.
+    """
     cn = int(m["cast_num"])
     cast_id = m.get("cast_num_str", format_cast_id(cn))
     cast_url = f"casts/cast_{cast_id}.html"
@@ -77,9 +90,10 @@ def _cast_panel_html(
         parts.append(f"Section: {section_name}")
 
     html = "<br>".join(parts)
-    html += f'<br><a href="{cast_url}">→ Station page</a>'
-    if section_name and section_url:
-        html += f'<br><a href="{section_url}">→ Section page</a>'
+    if with_links:
+        html += f'<br><a href="{cast_url}">→ Station page</a>'
+        if section_name and section_url:
+            html += f'<br><a href="{section_url}">→ Section page</a>'
     return html
 
 
@@ -87,8 +101,14 @@ def _section_panel_html(
     section_name: str,
     scfg: dict[str, Any],
     n_found: int,
+    *,
+    with_links: bool = True,
 ) -> str:
-    """Return HTML for the info panel when a section line is hovered."""
+    """Return HTML for the info panel when a section line is hovered.
+
+    With ``with_links=False`` the trailing section link is omitted, for a caller
+    (the vendored ``track_map`` macro) that appends its own link from the payload.
+    """
     section_url = f"sections/section_{section_name}.html"
     desc = scfg.get("description", "")
     parts = [f"<strong>{section_name}</strong>"]
@@ -96,8 +116,172 @@ def _section_panel_html(
         parts.append(desc)
     parts.append(f"{n_found} casts")
     html = "<br>".join(parts)
-    html += f'<br><a href="{section_url}">→ Section page</a>'
+    if with_links:
+        html += f'<br><a href="{section_url}">→ Section page</a>'
     return html
+
+
+#: Casts-map container height (CSS px), passed to the vendored ``map_styles`` macro.
+CASTS_MAP_HEIGHT = 420
+
+#: Minimum coastline extent (degrees) for the cast map.  A small open-ocean extent is grown to
+#: this span so a zoom-out reveals nearby land (coastlines are cheap — see
+#: ``coastline_geojson(min_clip_deg=...)``); the map still opens fitted to the casts.
+_COASTLINE_MIN_SPAN_DEG = 10.0
+
+#: Marker colour for a cast that belongs to no section (neutral grey, distinct from any section).
+_UNSECTIONED_CAST_COLOR = "#888888"
+
+
+def _finite_latlon(m: dict[str, Any]) -> bool:
+    """Return True when *m* carries a finite latitude and longitude."""
+    return bool(
+        np.isfinite(float(m.get("lat", np.nan)))
+        and np.isfinite(float(m.get("lon", np.nan)))
+    )
+
+
+def casts_map_payload(
+    all_meta: list[dict[str, Any]],
+    sections_cfg: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Return the vendored ``track_map`` payload for ``casts.html``.
+
+    One point per cast (``track`` is a single ``[lat, lon]`` → circle marker) and one
+    polyline per section (in cast order), each a dict
+    ``{id, href, color, track, info, link_label}``.  ``info`` is facts only; the macro
+    appends the ``link_label`` link to ``href``.  Sections are listed before casts so the
+    cast markers draw on top of the section lines.
+
+    This overlaps :func:`generate_leaflet_map`, which builds the same cast/section geometry
+    in ``leaflet.html``'s own (non-vendored) payload shape; the two stay separate only until
+    V4, when ``leaflet.html`` migrates onto this ``track_map`` payload and the other builder
+    is deleted rather than merged here.
+
+    Parameters
+    ----------
+    all_meta : list of dict
+        Per-cast metadata (``cast_num``, ``cast_num_str``, ``lat``, ``lon``, ``time_start``,
+        ``max_depth``).
+    sections_cfg : dict or None
+        Section definitions (``cast_numbers``, ``color``, ``description``).
+
+    Returns
+    -------
+    list of dict
+        The track payload.  Casts with no finite position, and sections with fewer than two
+        located casts, are omitted.
+    """
+    sections_cfg = sections_cfg or {}
+    meta_lookup = {int(m["cast_num"]): m for m in all_meta}
+    located = {cn for cn, m in meta_lookup.items() if _finite_latlon(m)}
+
+    cast_section: dict[int, tuple[str, str]] = {}
+    for sname, scfg in sections_cfg.items():
+        color = str(scfg.get("color", _SECTION_COLOR_DEFAULT))
+        for cn in expand_cast_numbers(scfg.get("cast_numbers", [])):
+            cast_section.setdefault(cn, (sname, color))
+
+    payload: list[dict[str, Any]] = []
+
+    for sname, scfg in sections_cfg.items():
+        color = str(scfg.get("color", _SECTION_COLOR_DEFAULT))
+        latlons = [
+            [float(meta_lookup[cn]["lat"]), float(meta_lookup[cn]["lon"])]
+            for cn in expand_cast_numbers(scfg.get("cast_numbers", []))
+            if cn in located
+        ]
+        if len(latlons) < 2:
+            continue
+        payload.append(
+            {
+                "id": f"section_{sname}",
+                "href": f"sections/section_{sname}.html",
+                "color": color,
+                "track": latlons,
+                "info": _section_panel_html(
+                    sname, scfg, len(latlons), with_links=False
+                ),
+                "link_label": "→ Section page",
+            }
+        )
+
+    for m in all_meta:
+        cn = int(m["cast_num"])
+        if cn not in located:
+            continue
+        cast_id = m.get("cast_num_str", format_cast_id(cn))
+        sname_c, color_c = cast_section.get(cn, ("", _UNSECTIONED_CAST_COLOR))
+        section_url = f"sections/section_{sname_c}.html" if sname_c else None
+        payload.append(
+            {
+                "id": f"cast_{cast_id}",
+                "href": f"casts/cast_{cast_id}.html",
+                "color": color_c,
+                "track": [[float(m["lat"]), float(m["lon"])]],
+                "info": _cast_panel_html(m, sname_c, section_url, with_links=False),
+                "link_label": "→ Station page",
+            }
+        )
+    return payload
+
+
+def _coastline_backend_available() -> bool:
+    """Return True when cartopy (the coastline backend) is importable, without importing it."""
+    return importlib.util.find_spec("cartopy") is not None
+
+
+def casts_map_context(
+    all_meta: list[dict[str, Any]],
+    sections_cfg: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Return the JSON strings the ``casts.html`` interactive map needs.
+
+    Builds the ``track_map`` payload, the land-coastline GeoJSON for the data extent, and
+    the fit bounds, each serialised for the template.  When the coastline is ``"null"``
+    *and* cartopy is not installed, warns (``RuntimeWarning``) so a land-less map traces to a
+    missing optional dependency rather than being silent.  A ``"null"`` coastline with cartopy
+    present is not flagged — it means the extent simply contains no land (an open-ocean cruise),
+    which the graticule covers.
+
+    Returns
+    -------
+    dict
+        ``{"casts_map_payload_json", "coastline_json", "map_bounds_json"}``.  With no located
+        cast the payload is ``"[]"`` and the coastline/bounds are ``"null"``.
+    """
+    payload = casts_map_payload(all_meta, sections_cfg)
+    # Bounds from fully-located casts only (both lat and lon finite), matching the drawn markers —
+    # a half-located cast must not stretch the fit box to a corner with nothing in it.
+    located = [
+        (float(m["lat"]), float(m["lon"])) for m in all_meta if _finite_latlon(m)
+    ]
+    if not (payload and located):
+        return {
+            "casts_map_payload_json": safe_json(payload),
+            "coastline_json": "null",
+            "map_bounds_json": "null",
+        }
+
+    lat_min, lat_max = min(la for la, _ in located), max(la for la, _ in located)
+    lon_min, lon_max = min(lo for _, lo in located), max(lo for _, lo in located)
+    coastline = coastline_geojson(
+        (lon_min, lat_min, lon_max, lat_max), min_clip_deg=_COASTLINE_MIN_SPAN_DEG
+    )
+    if coastline == "null" and not _coastline_backend_available():
+        warnings.warn(
+            "cast map has no land because cartopy is not installed; the map shows tracks "
+            "and the lat/lon graticule. Install the optional dependency with "
+            "'pip install ctdcast[maps]' for a coastline.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return {
+        "casts_map_payload_json": safe_json(payload),
+        # Escape `</` so an embedded `</script>` in the GeoJSON cannot close the tag.
+        "coastline_json": coastline.replace("</", "<\\/"),
+        "map_bounds_json": safe_json([[lat_min, lon_min], [lat_max, lon_max]]),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +547,7 @@ def _make_gebco_layers(
 # ---------------------------------------------------------------------------
 
 
-__all__ = ["generate_leaflet_map"]
+__all__ = ["casts_map_context", "casts_map_payload", "generate_leaflet_map"]
 
 
 def generate_leaflet_map(
