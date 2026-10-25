@@ -48,6 +48,7 @@ from ctdcast.reports._plots import (
     _make_overview_panel_b64,
     _make_section_ts_histogram_b64,
     _make_station_map_b64,  # noqa: F401 — kept for backward compat
+    _slot_width,
 )
 from ctdcast.reports._vendored import nc_tables
 from ctdcast.reports._vendored.page_model import (
@@ -62,6 +63,14 @@ from ctdcast.reports.cast import generate_station_page
 from ctdcast.reports.design import _JS_TOP_LINKS, SHARED_CSS, is_qc
 from ctdcast.reports.section import generate_section_page
 from ctdcast.reports.timeseries import generate_timeseries_page
+
+#: Display slots of the fixed-width cruise figures.  Each is drawn at its slot's
+#: width (``_slot_width``) and shown in the same slot.
+_MAP_SLOT = "half"
+_TS_SLOT = "third"
+_OVERVIEW_SLOT = "full"
+_CLOCK_SLOT = "full"
+
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -794,10 +803,13 @@ def _write_index(
             legend_outside=True,
             target_h=3.0,
             cfg=cfg,
+            width_in=_slot_width(_MAP_SLOT),
         )
     elif _valid_lats:
         # No sections configured (e.g. draft mode) — fall back to cruise-track map.
-        fig_map_b64 = _make_cruise_map_b64(all_meta, target_h=3.0, cfg=cfg)
+        fig_map_b64 = _make_cruise_map_b64(
+            all_meta, target_h=3.0, cfg=cfg, width_in=_slot_width(_MAP_SLOT)
+        )
     else:
         fig_map_b64 = None
 
@@ -857,11 +869,15 @@ def _write_index(
                     vmax=_vmax,
                     cast_groups=cast_groups,
                     cfg=cfg,
+                    width_in=_slot_width(_OVERVIEW_SLOT),
                 )
                 # title is the panel's HTML caption on index.html, so use the
                 # HTML-ready label (mathtext subscripts rendered as Unicode).
                 return RenderedPanel(
-                    b64=b64, title=vlabel_html(resolved), short=resolved
+                    b64=b64,
+                    title=vlabel_html(resolved),
+                    short=resolved,
+                    slot=_OVERVIEW_SLOT,
                 )
 
             physics_panels_idx = tuple(
@@ -871,9 +887,15 @@ def _write_index(
                 p for p in (_idx_panel(v) for v in SECTION_BIOGEO_VARS) if p.b64
             )
 
-            _ts_b64 = _make_section_ts_histogram_b64(ds_sorted, cfg=cfg)
+            _ts_b64 = _make_section_ts_histogram_b64(
+                ds_sorted, cfg=cfg, width_in=_slot_width(_TS_SLOT)
+            )
             ts_panels_idx = (
-                (RenderedPanel(b64=_ts_b64, title="All downcast profiles"),)
+                (
+                    RenderedPanel(
+                        b64=_ts_b64, title="All downcast profiles", slot=_TS_SLOT
+                    ),
+                )
                 if _ts_b64
                 else ()
             )
@@ -891,8 +913,13 @@ def _write_index(
                 ladcp_profiles_path, decode_timedelta=False, engine="netcdf4"
             ).load()
             velocity_panels_idx = tuple(
-                _make_ladcp_overview_b64(
-                    ds_ladcp, cast_groups=cast_groups, style=section_style, cfg=cfg
+                dataclasses.replace(p, slot=_OVERVIEW_SLOT)
+                for p in _make_ladcp_overview_b64(
+                    ds_ladcp,
+                    cast_groups=cast_groups,
+                    style=section_style,
+                    cfg=cfg,
+                    width_in=_slot_width(_OVERVIEW_SLOT),
                 )
             )
             ds_ladcp.close()
@@ -959,20 +986,20 @@ class IndexPageCtx:
 
 
 def _index_overview_panel(rp: RenderedPanel) -> Panel:
-    """Wrap a pre-rendered full-width cruise overview panel, captioned by variable."""
+    """Wrap a pre-rendered cruise overview panel, captioned by variable, at the slot it was drawn for."""
     return Panel(
         id=f"index_{rp.short or rp.title}",
-        slot="full",
+        slot=rp.slot,
         caption=rp.title,
         render=lambda _c, _b64=rp.b64: _b64,
     )
 
 
 def _index_ts_panel(rp: RenderedPanel) -> Panel:
-    """Wrap the pre-rendered cruise T–S histogram as a third-width panel."""
+    """Wrap the pre-rendered cruise T–S histogram in a panel at the slot it was drawn for."""
     return Panel(
         id="index_ts",
-        slot="third",
+        slot=rp.slot,
         caption=rp.title,
         render=lambda _c, _b64=rp.b64: _b64,
     )
@@ -982,7 +1009,7 @@ def _index_ts_panel(rp: RenderedPanel) -> Panel:
 INDEX_PANELS: dict[str, Panel] = {
     "index_map": Panel(
         id="index_map",
-        slot="half",
+        slot=_MAP_SLOT,
         applies_to=lambda c: c.map_b64 is not None,
         render=lambda c: c.map_b64,
     ),
@@ -1161,7 +1188,14 @@ def _make_clock_section(
     # The one gate both the CLI and this page read, so they cannot disagree.
     status = correction_status(coordinate_counts)
     figure_b64 = (
-        render_b64(draw_clock_offset_fig, series, verdict, cfg=cfg, optional=True)
+        render_b64(
+            draw_clock_offset_fig,
+            series,
+            verdict,
+            cfg=cfg,
+            width_in=_slot_width(_CLOCK_SLOT),
+            optional=True,
+        )
         if verdict.segments
         else None
     )
@@ -1176,6 +1210,7 @@ def _make_clock_section(
         "segments": segments,
         "casts": casts,
         "figure_b64": figure_b64,
+        "slot": _CLOCK_SLOT,
         "suggested_yaml": suggested if status == "apply" else None,
         "correction_status": status,
     }
@@ -1405,7 +1440,12 @@ def _write_sections_list(
     all_cast_lons = [v[1] for v in cast_pos.values()]
     sections_map_b64 = (
         _make_all_sections_map_b64(
-            sections_data, all_cast_lats, all_cast_lons, target_h=3.0, cfg=cfg
+            sections_data,
+            all_cast_lats,
+            all_cast_lons,
+            target_h=3.0,
+            cfg=cfg,
+            width_in=_slot_width(_MAP_SLOT),
         )
         if sections_data
         else None
@@ -1443,6 +1483,7 @@ def _write_sections_list(
         "casts_range": _casts_range,
         "sections": sections,
         "sections_map_b64": sections_map_b64,
+        "map_slot": _MAP_SLOT,
         "ladcp_configured": ladcp_dir is not None,
         "version": _VERSION,
         "generated_at": report_generated_at(generated_at),
@@ -1534,7 +1575,12 @@ def _write_timeseries_list(
     all_cast_lons = [v[1] for v in cast_pos.values()]
     timeseries_map_b64 = (
         _make_all_sections_map_b64(
-            timeseries_data, all_cast_lats, all_cast_lons, target_h=3.0, cfg=cfg
+            timeseries_data,
+            all_cast_lats,
+            all_cast_lons,
+            target_h=3.0,
+            cfg=cfg,
+            width_in=_slot_width(_MAP_SLOT),
         )
         if timeseries_data
         else None
@@ -1577,6 +1623,7 @@ def _write_timeseries_list(
         "ts_dur_range": _ts_dur_range,
         "timeseries": items,
         "timeseries_map_b64": timeseries_map_b64,
+        "map_slot": _MAP_SLOT,
         "ladcp_configured": ladcp_dir is not None,
         "version": _VERSION,
         "generated_at": report_generated_at(generated_at),

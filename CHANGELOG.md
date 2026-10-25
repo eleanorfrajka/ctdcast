@@ -15,10 +15,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `ctdcast.plotters.plots` is split by subject into `ctdcast.plotters.maps`, `profiles`, `sections`, `timeseries` and `ladcp`; helpers shared by more than one module move to `ctdcast.plotters.primitives`. Four helpers the report layer uses are now public: `primitives.hide_outer_spines`, `primitives.nice_colorbar_bounds`, `maps.square_map_limits`, `maps.GEBCO_RENDER_PAD`. Draw functions with a fixed width take `width_in` (default: the previous width; height follows at a fixed aspect); on the cast page each fixed-slot figure is drawn at its slot's width, named once per panel. No figure output changes. The per-figure `source:` caption now names the new module (e.g. `ctdcast/plotters/maps.py:draw_all_sections_map_fig`).
 - LADCP report panels read each cast once: `plotters.ladcp.ladcp_section_grid` and `ladcp_overview_grid` load, grid and scale the data once per page, shared by the U and V panels (section and time-series pages previously read every `.mat` file and repeated the GEBCO lookup twice). The cruise LADCP overview is drawn by the new `draw_ladcp_overview_fig`, so its `source:` caption names a draw function; `draw_ladcp_section_fig` takes an optional `grid=`. Same pixels.
+- Section, time-series and cruise-summary pages draw their fixed-width figures (section and location maps, T–S diagrams and histograms, the all-sections maps) at the width of the slot they are shown in; each page names those slots once. No figure output changes.
+- `plotters.maps.draw_section_map_fig` and `plotters.timeseries.draw_timeseries_fig` take the figure width as `width_in`, like the other draw functions.
+
+### Fixed
+
+- Cruise-overview panels in reports built with `ctdcast report` / `ctdcast run` were drawn 12 in wide and shown in the 9 in full-width slot, so their labels appeared at 75 % of the size of every other figure. Overview panels (CTD and LADCP) are now drawn at the slot width, keeping the configured aspect ratio, and the CLI falls back to the library defaults for `overview_figsize` / `profile_figsize` instead of its own `[12, 4]` / `[7, 10]`. The default overview shape is now 9 × 3 in (3:1) in `ReportConfig`, for API- and CLI-built reports alike (API-built panels were 9 × 4.5 in); `display: overview_figsize` still overrides the shape.
 
 ### Deprecated
 
 - `ctdcast.plotters.plots` re-exports the public figure builders from the new modules and emits a `DeprecationWarning` on import; it is removed in 0.7.0.
+- `draw_section_map_fig(fig_w=)` and `draw_timeseries_fig(figw=)` are deprecated aliases of `width_in=` and warn; passing both raises `TypeError`; removed in 0.7.0.
 
 ## [0.4.0] — 2026-10-23
 

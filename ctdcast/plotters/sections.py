@@ -47,6 +47,31 @@ from ctdcast.reports._vendored.design_tokens import (
 )
 
 
+def overview_figsize(
+    overview_size: tuple[float, float], width_in: float | None
+) -> tuple[float, float]:
+    """Return the overview-panel figure size: *width_in* wide at *overview_size*'s aspect.
+
+    Parameters
+    ----------
+    overview_size : tuple of float
+        ``(width, height)`` in inches from the report configuration; only its
+        aspect ratio is used when *width_in* is given.
+    width_in : float or None
+        Figure width in inches (the slot the panel is shown in); None keeps
+        *overview_size* unchanged.
+
+    Returns
+    -------
+    tuple of float
+        ``(width, height)`` in inches.
+    """
+    w, h = overview_size
+    if width_in is None:
+        return float(w), float(h)
+    return float(width_in), float(width_in) * float(h) / float(w)
+
+
 def section_figsize_and_slot(
     p_max_dbar: float,
     dist_km: float,
@@ -590,6 +615,7 @@ def draw_overview_panel_fig(
     cast_groups: dict[str, list[int]] | None = None,
     *,
     cfg: ReportConfig = DEFAULT_REPORT_CONFIG,
+    width_in: float | None = None,
 ) -> plt.Figure | None:
     """Return a Figure of *var* vs pressure × cast number (cruise overview panel).
 
@@ -611,7 +637,11 @@ def draw_overview_panel_fig(
     cast_groups : dict of str to list of int, optional
         Section colour → cast numbers, drawn as coloured markers above the axes.
     cfg : ReportConfig
-        Report configuration; ``var_cmaps`` and ``overview_figsize`` are used.
+        Report configuration; ``var_cmaps`` is used, and ``overview_figsize``
+        sets the size (its aspect ratio only, when *width_in* is given).
+    width_in : float, optional
+        Figure width in inches (the slot the panel is shown in); the height
+        follows ``overview_figsize``'s aspect.  None uses ``overview_figsize`` as is.
 
     Returns
     -------
@@ -649,7 +679,7 @@ def draw_overview_panel_fig(
     )
     y_bottom = max(p_max_data, p_max_bathy) * 1.05
 
-    fig, ax = plt.subplots(figsize=cfg.overview_figsize)
+    fig, ax = plt.subplots(figsize=overview_figsize(cfg.overview_figsize, width_in))
 
     # Subtle cast-position gridlines drawn before the fill so the fill sits on top.
     # Use multiples of 5 or 10 cast numbers as grid positions.
