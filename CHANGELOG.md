@@ -11,6 +11,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Interactive cast map on `casts.html`** — the cruise map is now the live Leaflet map (the vendored `track_map` layer): one marker per cast and one polyline per section, each hover-linked to its table row (rows carry `data-track-id`), with click-through to the station/section page. The static cruise-map PNG stays as the print / no-JavaScript fallback. Land coastline needs the optional `[maps]` extra (`pip install ctdcast[maps]`, cartopy); without it the map draws tracks over the lat/lon graticule and the build warns. The GEBCO bathymetry map (`leaflet.html`) is unchanged and still linked, until bathymetry moves into the shared map layer.
 
+### Changed
+
+- `ctdcast.plotters.plots` is split by subject into `ctdcast.plotters.maps`, `profiles`, `sections`, `timeseries` and `ladcp`; helpers shared by more than one module move to `ctdcast.plotters.primitives`. Four helpers the report layer uses are now public: `primitives.hide_outer_spines`, `primitives.nice_colorbar_bounds`, `maps.square_map_limits`, `maps.GEBCO_RENDER_PAD`. Draw functions with a fixed width take `width_in` (default: the previous width; height follows at a fixed aspect); on the cast page each fixed-slot figure is drawn at its slot's width, named once per panel. No figure output changes. The per-figure `source:` caption now names the new module (e.g. `ctdcast/plotters/maps.py:draw_all_sections_map_fig`).
+- LADCP report panels read each cast once: `plotters.ladcp.ladcp_section_grid` and `ladcp_overview_grid` load, grid and scale the data once per page, shared by the U and V panels (section and time-series pages previously read every `.mat` file and repeated the GEBCO lookup twice). The cruise LADCP overview is drawn by the new `draw_ladcp_overview_fig`, so its `source:` caption names a draw function; `draw_ladcp_section_fig` takes an optional `grid=`. Same pixels.
+
+### Deprecated
+
+- `ctdcast.plotters.plots` re-exports the public figure builders from the new modules and emits a `DeprecationWarning` on import; it is removed in 0.7.0.
+
 ## [0.4.0] — 2026-10-23
 
 ### Added
