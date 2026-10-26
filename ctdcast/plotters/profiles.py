@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
 
 import gsw
@@ -52,6 +53,22 @@ from ctdcast.reports._vendored.design_tokens import (
 _LADCP_U_COLOR: str = VAR_COLORS["U"]
 
 _LADCP_V_COLOR: str = VAR_COLORS["V"]
+
+
+def _oxygen_label(attrs: Mapping[str, object]) -> str:
+    """Oxygen-saturation axis label, naming the line a dual-oxygen cast drew.
+
+    A dual cast's composite carries ``oxygen_line`` and ``preferred_oxygen``: a declared
+    choice reads ``… · secondary``, an undeclared one ``… · line 1, not declared``.  A
+    single-oxygen cast carries neither and gets the plain label.
+    """
+    base = vlabel("oxygen_saturation")
+    pref = attrs.get("preferred_oxygen")
+    if pref == "undeclared":
+        return f"{base} · line {attrs.get('oxygen_line', 1)}, not declared"
+    if pref:
+        return f"{base} · {pref}"
+    return base
 
 
 def draw_ts_density_fig(
@@ -256,7 +273,7 @@ def draw_ts_diagram_fig(
         shrink=0.9,
         aspect=20,
     )
-    cb.set_label(vlabel("oxygen_saturation"), loc="left")
+    cb.set_label(_oxygen_label(ds_down[_oxsat_var].attrs), loc="left")
 
     ax.set_xlabel(vlabel("absolute_salinity"))
     ax.set_ylabel(vlabel("conservative_temperature"))
@@ -358,7 +375,9 @@ def draw_aux_profiles_fig(
     vars_labels = [
         (
             next((v for v in ("oxygen_saturation", "oxsat_1") if v in ds), None),
-            vlabel("oxygen_saturation"),
+            _oxygen_label(
+                ds["oxygen_saturation"].attrs if "oxygen_saturation" in ds else {}
+            ),
         ),
         (
             next((v for v in ("ctd_fluor", "fluorescence") if v in ds), None),

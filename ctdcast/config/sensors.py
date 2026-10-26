@@ -117,6 +117,27 @@ ROLE_VARIABLE: dict[str, str] = {
 FREQUENCY_ROLES: frozenset[str] = frozenset({"temperature", "conductivity", "pressure"})
 
 
+def is_sensor_catalog_var(name: str) -> bool:
+    """Return whether *name* is a sensor-catalog entry (``SENSOR_<TYPE>_<SERIAL>``).
+
+    The catalog entries are the uppercase dimensionless ``SENSOR_*`` scalars.  A
+    ``SENSOR_*_qc`` companion is not an entry, and neither are the lowercase
+    ``sensor_<role>`` linkage or ``sensor_channel_<role>`` variables.
+
+    Parameters
+    ----------
+    name : str
+        The variable name.
+
+    Returns
+    -------
+    bool
+        ``True`` when *name* starts with ``SENSOR_`` and does not end with ``_qc``.
+    """
+    name = str(name)
+    return name.startswith("SENSOR_") and not name.endswith("_qc")
+
+
 def role_base(role: str) -> str:
     """Strip a dual-sensor index from *role* (``temperature_1`` -> ``temperature``).
 

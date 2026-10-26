@@ -15,6 +15,7 @@ the netCDF inventory pages.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,12 +23,117 @@ import numpy as np
 import xarray as xr
 
 from ctdcast._version import __version__ as _VERSION
+from ctdcast.config.cnv_header import cal_value_nondefault
+from ctdcast.config.sensors import ROLE_ORDER, is_sensor_catalog_var
 from ctdcast.config.sensors import role_label as _role_label
 from ctdcast.config.sensors import role_sort_key as _role_sort_key
 from ctdcast.reports._env import get_template
 from ctdcast.reports._format import report_generated_at
 from ctdcast.reports._navs import nav_for
 from ctdcast.reports.design import _JS_TOP_LINKS, SHARED_CSS
+
+
+def _linkage_roles(names: list[str]) -> list[str]:
+    """Return the roles that have a ``sensor_<role>`` linkage variable among *names*.
+
+    Selected by inclusion: ``<role>`` is a known role (:data:`ROLE_ORDER`) or has a
+    ``sensor_channel_<role>`` twin.  Anything else with a ``sensor_`` prefix — the
+    ``sensor_<role>_preferred`` choice, the channel variables themselves — is not a role.
+    """
+    present = set(names)
+    roles = {
+        n[len("sensor_") :]
+        for n in names
+        if n.startswith("sensor_") and not n.startswith("sensor_channel_")
+    }
+    return sorted(
+        (r for r in roles if r in ROLE_ORDER or f"sensor_channel_{r}" in present),
+        key=_role_sort_key,
+    )
+
+
+def _cast_range(start: int, end: int) -> str:
+    """Format a run of casts as ``011`` or ``011–014``."""
+    return f"{start:03d}" if start == end else f"{start:03d}–{end:03d}"
+
+
+#: How the preferred-choice table names a cast with no choice to make, or one it was not given.
+_SINGLE = "single sensor"
+_NOT_DECLARED = "not declared"
+_OXYGEN_NOT_DECLARED = "line 1 shown (not declared)"
+
+
+def _preferred_runs(
+    ds: xr.Dataset,
+    downs: list[int],
+    cast_num: np.ndarray,
+    dev_by_role: dict[str, np.ndarray],
+    serial_of: Callable[[str], str],
+) -> list[dict[str, Any]]:
+    """Return the per-cast preferred T/C pair and oxygen, collapsed into runs of casts.
+
+    One row per run of consecutive casts with the same choice and serials.  A dual T/C
+    cast shows its declared ``primary``/``secondary`` pair and that pair's serials, or
+    ``not declared``; a dual-oxygen cast likewise, except an undeclared one shows line 1,
+    which is what the figures draw.  A single-sensor cast has no choice.  Returns ``[]``
+    when no cast has a second T/C pair or a second oxygen sensor.
+    """
+    empty = np.array([""] * len(cast_num))
+
+    def _link(role: str) -> np.ndarray:
+        return dev_by_role.get(role, empty)
+
+    def _var(name: str) -> np.ndarray:
+        return ds[name].values.astype(str) if name in ds.variables else empty
+
+    pair_word, oxy_word = _var("preferred_pair"), _var("preferred_oxygen")
+    t_pref, c_pref = (
+        _var("sensor_temperature_preferred"),
+        _var("sensor_conductivity_preferred"),
+    )
+    o_pref = _var("sensor_oxygen_preferred")
+    t1, c1, t2 = _link("temperature_1"), _link("conductivity_1"), _link("temperature_2")
+    o1, o2 = _link("oxygen_1"), _link("oxygen_2")
+    if not any(t2[i] or o2[i] for i in downs):
+        return []
+
+    runs: list[dict[str, Any]] = []
+    prev: tuple[str, ...] | None = None
+    for i in downs:
+        if not t2[i]:
+            pair, pair_serials = _SINGLE, f"{serial_of(t1[i])} / {serial_of(c1[i])}"
+        elif pair_word[i]:
+            pair = str(pair_word[i])
+            pair_serials = f"{serial_of(t_pref[i])} / {serial_of(c_pref[i])}"
+        else:
+            pair, pair_serials = _NOT_DECLARED, ""
+        if not o1[i]:
+            oxygen, oxygen_serial = "", ""
+        elif not o2[i]:
+            oxygen, oxygen_serial = _SINGLE, serial_of(o1[i])
+        elif oxy_word[i]:
+            oxygen, oxygen_serial = str(oxy_word[i]), serial_of(o_pref[i])
+        else:
+            oxygen, oxygen_serial = _OXYGEN_NOT_DECLARED, serial_of(o1[i])
+        row = (pair, pair_serials, oxygen, oxygen_serial)
+        cast = int(cast_num[i])
+        if row == prev:
+            runs[-1]["cast_end"] = cast
+            continue
+        prev = row
+        runs.append(
+            dict(
+                zip(
+                    ("pair", "pair_serials", "oxygen", "oxygen_serial"),
+                    row,
+                    strict=True,
+                )
+            )
+            | {"cast_start": cast, "cast_end": cast}
+        )
+    for r in runs:
+        r["range"] = _cast_range(r["cast_start"], r["cast_end"])
+    return runs
 
 
 def read_sensor_tables(profiles_path: Path) -> dict[str, Any]:
@@ -45,19 +151,8 @@ def read_sensor_tables(profiles_path: Path) -> dict[str, Any]:
         return {"filename": profiles_path.name, "error": str(exc)}
 
     with ds:
-        catalog_names = sorted(v for v in ds.variables if str(v).startswith("SENSOR_"))
-        roles = sorted(
-            (
-                str(v)[len("sensor_") :]
-                for v in ds.variables
-                if str(v).startswith("sensor_")
-                and not str(v).startswith("sensor_channel_")
-                # `sensor_<role>_preferred` records the preferred line per profile, not a
-                # role linkage — exclude it so it is not read as a spurious role.
-                and not str(v).endswith("_preferred")
-            ),
-            key=_role_sort_key,
-        )
+        catalog_names = sorted(str(v) for v in ds.variables if is_sensor_catalog_var(v))
+        roles = _linkage_roles([str(v) for v in ds.variables])
         cast_num = (
             ds["cast_number"].values if "cast_number" in ds.variables else np.array([])
         )
@@ -84,8 +179,16 @@ def read_sensor_tables(profiles_path: Path) -> dict[str, Any]:
         catalog = []
         for name in catalog_names:
             a = {str(k): str(val) for k, val in ds[name].attrs.items()}
+            slope = a.get("sensor_calibration_slope", "")
+            offset = a.get("sensor_calibration_offset", "")
             catalog.append(
                 {
+                    "slope": slope,
+                    "offset": offset,
+                    "slope_nondefault": bool(slope)
+                    and cal_value_nondefault(slope, 1.0),
+                    "offset_nondefault": bool(offset)
+                    and cal_value_nondefault(offset, 0.0),
                     "sensor_type": a.get("sensor_type", ""),
                     "model": a.get("sensor_model", ""),
                     "serial": a.get("sensor_serial_number", ""),
@@ -171,11 +274,11 @@ def read_sensor_tables(profiles_path: Path) -> dict[str, Any]:
             else:
                 blocks[-1]["cast_end"] = cast
         for b in blocks:
-            b["range"] = (
-                f"{b['cast_start']:03d}"
-                if b["cast_start"] == b["cast_end"]
-                else f"{b['cast_start']:03d}–{b['cast_end']:03d}"
-            )
+            b["range"] = _cast_range(b["cast_start"], b["cast_end"])
+
+        preferred = _preferred_runs(
+            ds, downs, cast_num, dev_by_role, lambda name: ms.get(name, ("", ""))[1]
+        )
 
         role_cols = [{"key": r, "label": _role_label(r)} for r in roles]
 
@@ -191,8 +294,12 @@ def read_sensor_tables(profiles_path: Path) -> dict[str, Any]:
             "n_casts": n_casts,
             "n_devices": len(catalog),
             "n_changes": len(changes),
+            "any_calibrated": any(
+                r["slope_nondefault"] or r["offset_nondefault"] for r in catalog
+            ),
             "role_cols": role_cols,
             "blocks": blocks,
+            "preferred": preferred,
             "catalog": catalog,
             "changes": changes,
             "rewiring": rewiring,

@@ -26,6 +26,7 @@ from ctdcast.config.parameters import (
     SECTION_BIOGEO_VARS,
     SECTION_PHYSICS_VARS,
     UNKNOWN_CRUISE_ID,
+    color_limit_override,
     resolve_sensor_var,
     vlabel,
 )
@@ -410,16 +411,8 @@ def _ts_field_render(
     def _render(c: TimeseriesPageCtx) -> str | Stub | None:
         resolved = resolve_sensor_var(c.ds_ts, var) if optional else var
         key = canonical or var
-        _vmin = (
-            c.vmin.get(resolved)
-            if c.vmin.get(resolved) is not None
-            else c.vmin.get(key)
-        )
-        _vmax = (
-            c.vmax.get(resolved)
-            if c.vmax.get(resolved) is not None
-            else c.vmax.get(key)
-        )
+        _vmin = color_limit_override(c.vmin, key, resolved)
+        _vmax = color_limit_override(c.vmax, key, resolved)
         return as_panel(
             lambda: _make_timeseries_b64(
                 c.ds_ts,

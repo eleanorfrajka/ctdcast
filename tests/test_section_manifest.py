@@ -114,9 +114,8 @@ def test_vmin_override_by_registry_name_reaches_both_pages(monkeypatch, tmp_path
     """A vmin override keyed by the registry name (``ctd_oxygen_1``) is honoured on
     both the section page and the cruise overview.
 
-    The demo is single-oxygen, so the data is stored as plain ``ctd_oxygen`` while
-    ``SECTION_BIOGEO_VARS`` names ``ctd_oxygen_1``; both pages must resolve the
-    sensor var and then fall back to the registry key for the override lookup.
+    The demo is single-oxygen, so the data is stored as plain ``ctd_oxygen``; an
+    override keyed by the suffixed form must still reach both pages.
     """
     import ctdcast.reports.index as index_mod
     import ctdcast.reports.section as section_mod

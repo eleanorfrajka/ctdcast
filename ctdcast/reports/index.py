@@ -23,6 +23,7 @@ from ctdcast.config.parameters import (
     SECTION_BIOGEO_VARS,
     SECTION_PHYSICS_VARS,
     UNKNOWN_CRUISE_ID,
+    color_limit_override,
     resolve_sensor_var,
     vlabel,
     vlabel_html,
@@ -845,20 +846,10 @@ def _write_index(
                 # ``ctd_oxygen_1``), the way the section page does — otherwise the
                 # overview silently drops a variable it holds under the other form.
                 resolved = resolve_sensor_var(ds_sorted, var)
-                # An override may be keyed by the resolved name or by the registry
-                # name (`var`); honour the resolved form first, then fall back to
-                # the registry key, the way the section page does — otherwise an
-                # override set under `ctd_oxygen_1` is dropped on the overview.
-                _vmin = (
-                    vmin.get(resolved)
-                    if vmin.get(resolved) is not None
-                    else vmin.get(var)
-                )
-                _vmax = (
-                    vmax.get(resolved)
-                    if vmax.get(resolved) is not None
-                    else vmax.get(var)
-                )
+                # An override may be keyed by either sensor form; same lookup as the
+                # section page.
+                _vmin = color_limit_override(vmin, var, resolved)
+                _vmax = color_limit_override(vmax, var, resolved)
                 b64 = _make_overview_panel_b64(
                     ds_sorted,
                     resolved,
