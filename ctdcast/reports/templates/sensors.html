@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "_macros.html" as m %}
 {% import "_nc_tables.html" as nc %}
+{% import "_sensor_vars.html" as sv %}
 
 {% block title %}SBE sensors — {{ cruise }}{% endblock %}
 {% block masthead_title %}SBE sensors{% endblock %}
@@ -44,6 +45,7 @@ profiles carry the sensor catalog and per-profile linkage.</p>
 {% if meta.preferred %}{% set sections = sections + [("s-preferred", "Preferred sensors")] %}{% endif %}
 {% set sections = sections + [("s-inventory", "Sensor inventory")] %}
 {% if meta.has_channel %}{% set sections = sections + [("s-rewiring", "Rewiring")] %}{% endif %}
+{% if sensor_vars %}{% set sections = sections + [("s-variables", "Sensor variables")] %}{% endif %}
 {% macro heading(id) %}{% for sid, title in sections %}{% if sid == id %}<h2 id="{{ sid }}">{{ m.heading_text(loop.index, title) }}</h2>{% endif %}{% endfor %}{% endmacro %}
 
 <div class="jump-nav">
@@ -129,6 +131,13 @@ profiles carry the sensor catalog and per-profile linkage.</p>
 {% else %}
 <p class="caption">No rewiring — every device stayed on its original channel.</p>
 {% endif %}
+{% endif %}
+
+{% if sensor_vars %}
+{{ heading("s-variables") }}
+<p class="caption">The variables in <code>{{ meta.filename }}</code> that the tables above are built from{% if inventory_href %}; the rest of the file is in its <a href="{{ inventory_href }}">netCDF inventory</a>{% endif %}.</p>
+{{ sv.explanation() }}
+{{ sv.tables(sensor_vars) }}
 {% endif %}
 
 {% endif %}

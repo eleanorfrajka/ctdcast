@@ -121,3 +121,39 @@ def test_owned_templates_use_the_vendored_thead():
         if p.name not in _TH_EXEMPT and re.search(r"<th[\s>]", p.read_text())
     )
     assert offenders == []
+
+
+def test_report_inventory_points_to_sensors_page(fixture_profiles, tmp_path):
+    from ctdcast.reports.dataset import generate_dataset_page
+
+    html = generate_dataset_page(
+        fixture_profiles, tmp_path / "inv.html", sensors_href="sbe_sensors.html"
+    ).read_text()
+    assert 'id="s-sensors"' in html
+    assert 'href="sbe_sensors.html#s-variables"' in html
+    assert "sensor_channel_&lt;role&gt;" in html  # the three families are explained
+    assert 'id="s-sensor-catalog"' not in html  # the tables live on the sensors page
+
+
+def test_standalone_inventory_keeps_sensor_tables(fixture_profiles, tmp_path):
+    from ctdcast.reports.dataset import generate_dataset_page
+
+    html = generate_dataset_page(fixture_profiles, tmp_path / "inv.html").read_text()
+    for sid in (
+        "s-sensors",
+        "s-sensor-catalog",
+        "s-sensor-linkage",
+        "s-sensor-channel",
+    ):
+        assert f'id="{sid}"' in html
+    assert "sbe_sensors.html" not in html
+
+
+def test_sensors_page_ends_with_the_sensor_variables(fixture_profiles, tmp_path):
+    html = generate_sensors_page(
+        fixture_profiles, tmp_path / "s.html", inventory_href="profiles_inventory.html"
+    ).read_text()
+    assert 'id="s-variables"' in html and 'href="profiles_inventory.html"' in html
+    for sid in ("s-sensor-catalog", "s-sensor-linkage", "s-sensor-channel"):
+        assert f'id="{sid}"' in html
+    assert "SENSOR_CONDUCTIVITY_3120" in html

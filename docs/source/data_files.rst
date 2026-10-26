@@ -459,7 +459,9 @@ refinements come from the ``sensors:`` block in ``config.yaml`` (see above). The
 ``SBE sensors`` report page presents all of this as configuration, inventory and
 rewiring tables, plus the per-cast preferred T/C pair and oxygen (where a cast carries
 two); the inventory lists each temperature, conductivity and pressure sensor's datcnv
-Slope and Offset.
+Slope and Offset. The page ends with the ``SENSOR_*``, ``sensor_<role>`` and
+``sensor_channel_<role>`` variables themselves; the ``profiles.nc`` netCDF inventory
+page explains the three families and links there rather than repeating them.
 
 Where it is built, and two kinds of provenance
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

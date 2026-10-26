@@ -579,6 +579,13 @@ def report(
                     inventory_pills=inventory_datasets,
                     current_href=_href,
                     generated_at=generated_at,
+                    # The profiles inventory points at the sensors page for its sensor
+                    # variables rather than repeating the tables there.
+                    sensors_href=(
+                        "sbe_sensors.html"
+                        if _has_sensors and Path(_src) == Path(profiles_path)
+                        else None
+                    ),
                 )
                 print(f"  [{_href}: {perf_counter() - _t0:.1f}s]")
             except Exception:  # noqa: BLE001
@@ -604,6 +611,7 @@ def report(
                     inventory_pills=inventory_datasets,
                     current_href="sbe_sensors.html",
                     generated_at=generated_at,
+                    inventory_href=f"{Path(profiles_path).stem}_inventory.html",
                 )
                 print(f"  [sbe_sensors.html: {perf_counter() - _t0:.1f}s]")
             except Exception:  # noqa: BLE001

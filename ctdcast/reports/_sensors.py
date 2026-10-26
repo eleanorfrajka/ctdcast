@@ -30,6 +30,7 @@ from ctdcast.config.sensors import role_sort_key as _role_sort_key
 from ctdcast.reports._env import get_template
 from ctdcast.reports._format import report_generated_at
 from ctdcast.reports._navs import nav_for
+from ctdcast.reports.dataset import sensor_variable_tables
 from ctdcast.reports.design import _JS_TOP_LINKS, SHARED_CSS
 
 
@@ -316,6 +317,7 @@ def generate_sensors_page(
     inventory_pills: list[dict[str, str]] | None = None,
     current_href: str = "sbe_sensors.html",
     generated_at: str | None = None,
+    inventory_href: str | None = None,
 ) -> Path:
     """Render the SBE sensors page for *profiles_path* to *out_path*.
 
@@ -326,8 +328,17 @@ def generate_sensors_page(
     this page's own pill as the non-link active one.  ``generated_at`` pins the page
     build stamp (``None`` uses the current UTC time), threaded from
     :func:`ctdcast.report` so one build stamps every page identically.
+    The page ends with the file's sensor-variable tables (``SENSOR_*``, ``sensor_<role>``,
+    ``sensor_channel_<role>``); ``inventory_href`` links them back to the file's netCDF
+    inventory page, which points here instead of repeating them.
     """
     meta = read_sensor_tables(profiles_path)
+    sensor_vars = None
+    if not meta.get("error") and meta.get("has_catalog"):
+        with xr.open_dataset(
+            profiles_path, engine="netcdf4", decode_timedelta=False
+        ) as ds:
+            sensor_vars = sensor_variable_tables(ds)
     nav = (
         nav_for(
             None,
@@ -340,6 +351,8 @@ def generate_sensors_page(
     )
     html = get_template("sensors.html").render(
         meta=meta,
+        sensor_vars=sensor_vars,
+        inventory_href=inventory_href,
         page_title=f"SBE sensors — {cruise}" if cruise else "SBE sensors",
         cruise=cruise,
         css=SHARED_CSS,
